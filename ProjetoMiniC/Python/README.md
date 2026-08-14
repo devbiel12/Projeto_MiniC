@@ -42,6 +42,15 @@ uv python install 3.12
 uv run python -m src.lexer
 ```
 
+## Interface gráfica do lexer
+
+O ponto de entrada do módulo em `src.lexer` foi convertido para uma interface em Tkinter, permitindo:
+
+- executar os testes já criados;
+- escrever código diretamente na interface;
+- abrir um arquivo `.py` para análise;
+- visualizar os tokens e diagnósticos léxicos em uma área de saída.
+
 ## O que a execução mostra
 
 Ao rodar o módulo, o programa executa uma série de testes de validação do lexer, incluindo:
@@ -50,7 +59,7 @@ Ao rodar o módulo, o programa executa uma série de testes de validação do le
 2. código com símbolos inválidos e string não fechada
 3. código com operadores lógicos e comentário de bloco sem fechar
 
-A saída exibirá os tokens reconhecidos e os erros léxicos encontrados.
+Além disso, é possível testar qualquer texto manualmente ou importar um arquivo do usuário para análise.
 
 ## Módulos do lexer
 
@@ -59,7 +68,7 @@ A saída exibirá os tokens reconhecidos e os erros léxicos encontrados.
 - `errors.py`: define as exceções e mensagens de erro léxico
 - `scanner.py`: percorre o código-fonte e identifica cada token
 - `demo.py`: contém os testes de demonstração
-- `__main__.py`: ponto de entrada para execução do módulo
+- `__main__.py`: ponto de entrada para execução do módulo, com suporte a interface gráfica
 
 ## Próximos passos
 
