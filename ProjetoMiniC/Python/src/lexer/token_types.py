@@ -23,11 +23,14 @@ class TokenType(Enum):
     # ------------------------------------------------------------------
 
     # Palavras reservadas
+    KW_BOOL = auto()
     KW_INT = auto()
     KW_FLOAT = auto()
     KW_CHAR = auto()
     KW_DOUBLE = auto()
     KW_VOID = auto()
+    KW_TRUE = auto()
+    KW_FALSE = auto()
     KW_IF = auto()
     KW_ELSE = auto()
     KW_WHILE = auto()
@@ -77,6 +80,7 @@ class TokenType(Enum):
     RBRACKET = auto()
     SEMI = auto()
     COMMA = auto()
+    DOT = auto()
 
     # Controle
     EOF = auto()
@@ -89,11 +93,14 @@ class TokenType(Enum):
 # "if" ou "return", ele reconhece imediatamente o token correto.
 # ------------------------------------------------------------------
 RESERVED_WORDS: Dict[str, TokenType] = {
+    "bool": TokenType.KW_BOOL,
     "int": TokenType.KW_INT,
     "float": TokenType.KW_FLOAT,
     "char": TokenType.KW_CHAR,
     "double": TokenType.KW_DOUBLE,
     "void": TokenType.KW_VOID,
+    "true": TokenType.KW_TRUE,
+    "false": TokenType.KW_FALSE,
     "if": TokenType.KW_IF,
     "else": TokenType.KW_ELSE,
     "while": TokenType.KW_WHILE,

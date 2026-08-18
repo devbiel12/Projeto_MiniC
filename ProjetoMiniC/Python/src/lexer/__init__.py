@@ -30,7 +30,9 @@ Executar a demonstração
 
 from .errors import (
     InvalidSymbolError,
+    InvalidIdentifierError,
     LexicalError,
+    MalformedRealLiteralError,
     UnterminatedCharError,
     UnterminatedCommentError,
     UnterminatedStringError,
@@ -46,6 +48,8 @@ __all__ = [
     "RESERVED_WORDS",
     "LexicalError",
     "InvalidSymbolError",
+    "InvalidIdentifierError",
+    "MalformedRealLiteralError",
     "UnterminatedStringError",
     "UnterminatedCommentError",
     "UnterminatedCharError",

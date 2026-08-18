@@ -16,7 +16,9 @@ from typing import Dict, List, Optional, Union
 
 from .errors import (
     InvalidSymbolError,
+    InvalidIdentifierError,
     LexicalError,
+    MalformedRealLiteralError,
     UnterminatedCharError,
     UnterminatedCommentError,
     UnterminatedStringError,
@@ -46,6 +48,7 @@ class Scanner:
         "-": TokenType.MINUS,
         "*": TokenType.STAR,
         "%": TokenType.PERCENT,
+        ".": TokenType.DOT,
         "(": TokenType.LPAREN,
         ")": TokenType.RPAREN,
         "{": TokenType.LBRACE,
@@ -152,21 +155,36 @@ class Scanner:
         # Lê sequências numéricas inteiras ou decimais.
         # Ex.: 10, 3.14, 0.
         lexeme = first_digit
-        is_float = False
 
         while not self._at_end() and self._peek().isdigit():
             lexeme += self._advance()
 
-        if self._peek() == "." and self._peek(1).isdigit():
-            is_float = True
-            lexeme += self._advance()  # consome '.'
-            while not self._at_end() and self._peek().isdigit():
+        if self._peek().isalpha() or self._peek() == "_":
+            while not self._at_end() and (self._peek().isalnum() or self._peek() == "_"):
                 lexeme += self._advance()
+            self.errors.append(InvalidIdentifierError(lexeme, line, col))
+            self._add_token(TokenType.ERROR, lexeme, line, col)
+            return
 
-        if is_float:
-            self._add_token(TokenType.NUM_FLOAT, lexeme, line, col, float(lexeme))
-        else:
-            self._add_token(TokenType.NUM_INT, lexeme, line, col, int(lexeme))
+        if self._peek() == ".":
+            lexeme += self._advance()
+            if self._peek().isdigit():
+                while not self._at_end() and self._peek().isdigit():
+                    lexeme += self._advance()
+                if self._peek().isalpha() or self._peek() == "_":
+                    while not self._at_end() and (self._peek().isalnum() or self._peek() == "_"):
+                        lexeme += self._advance()
+                    self.errors.append(InvalidIdentifierError(lexeme, line, col))
+                    self._add_token(TokenType.ERROR, lexeme, line, col)
+                    return
+                self._add_token(TokenType.NUM_FLOAT, lexeme, line, col, float(lexeme))
+                return
+
+            self.errors.append(MalformedRealLiteralError(lexeme, line, col))
+            self._add_token(TokenType.ERROR, lexeme, line, col)
+            return
+
+        self._add_token(TokenType.NUM_INT, lexeme, line, col, int(lexeme))
 
     def _string(self, line: int, col: int) -> None:
         # Processa literais de string entre aspas duplas.

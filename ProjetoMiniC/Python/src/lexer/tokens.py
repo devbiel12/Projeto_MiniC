@@ -31,6 +31,25 @@ class Token:
     column: int
     attribute: Attribute = None
 
+    def display_type_name(self) -> str:
+        """Retorna o nome externo esperado pelos fixtures do professor."""
+        mapping = {
+            "KW_BOOL": "BOOL",
+            "KW_INT": "INT",
+            "KW_FLOAT": "FLOAT",
+            "KW_CHAR": "CHAR",
+            "KW_DOUBLE": "DOUBLE",
+            "KW_VOID": "VOID",
+            "KW_TRUE": "TRUE",
+            "KW_FALSE": "FALSE",
+            "NUM_INT": "INT_LIT",
+            "NUM_FLOAT": "FLOAT_LIT",
+            "STRING": "STRING_LIT",
+            "CHAR_LITERAL": "CHAR_LIT",
+            "SEMI": "SEMICOLON",
+        }
+        return mapping.get(self.type.name, self.type.name)
+
     @property
     def is_keyword(self) -> bool:
         """True se o token corresponde a uma palavra reservada da linguagem."""
@@ -41,7 +60,17 @@ class Token:
         """Retorna a tupla (nome, lexema, linha, coluna, atributo) para tabelas."""
         # Converte o atributo em texto para facilitar a impressão em tabelas.
         attr = "" if self.attribute is None else str(self.attribute)
-        return (self.type.name, self.lexeme, self.line, self.column, attr)
+        return (self.display_type_name(), self.lexeme, self.line, self.column, attr)
+
+    def as_record(self) -> dict:
+        """Retorna uma representação serializável para JSONL."""
+        return {
+            "type": self.display_type_name(),
+            "lexeme": self.lexeme,
+            "line": self.line,
+            "column": self.column,
+            "attribute": self.attribute,
+        }
 
     def __str__(self) -> str:
         # Gera uma representação legível do token para depuração.

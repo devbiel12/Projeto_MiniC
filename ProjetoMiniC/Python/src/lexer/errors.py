@@ -24,12 +24,15 @@ Este módulo não depende de nenhum outro módulo do pacote.
 class LexicalError(Exception):
     """Erro léxico genérico, com posição e mensagem de diagnóstico."""
 
+    code = "LEXICAL_ERROR"
+
     def __init__(self, message: str, line: int, column: int, lexeme: str = ""):
         # Guarda os dados do erro para facilitar a exibição e a depuração.
         self.message = message
         self.line = line
         self.column = column
         self.lexeme = lexeme
+        self.code = self.__class__.code
         super().__init__(self.diagnostic())
 
     def diagnostic(self) -> str:
@@ -41,6 +44,8 @@ class LexicalError(Exception):
 class InvalidSymbolError(LexicalError):
     """Disparado quando um caractere não pertence ao alfabeto da linguagem."""
 
+    code = "UNKNOWN_SYMBOL"
+
     def __init__(self, char: str, line: int, column: int):
         # Exemplo: uso de '@' ou outro caractere que o lexer não conhece.
         super().__init__(
@@ -49,8 +54,34 @@ class InvalidSymbolError(LexicalError):
         )
 
 
+class InvalidIdentifierError(LexicalError):
+    """Disparado quando um identificador começa com dígitos."""
+
+    code = "INVALID_IDENTIFIER"
+
+    def __init__(self, lexeme: str, line: int, column: int):
+        super().__init__(
+            "identificador inválido (não pode começar com dígito)",
+            line, column, lexeme,
+        )
+
+
+class MalformedRealLiteralError(LexicalError):
+    """Disparado quando um literal real termina com ponto sem fração."""
+
+    code = "MALFORMED_REAL_LITERAL"
+
+    def __init__(self, lexeme: str, line: int, column: int):
+        super().__init__(
+            "literal real mal formado (faltou a parte fracionária após '.')",
+            line, column, lexeme,
+        )
+
+
 class UnterminatedStringError(LexicalError):
     """Disparado quando uma cadeia de caracteres não é fechada com '\"'."""
+
+    code = "UNTERMINATED_STRING_LITERAL"
 
     def __init__(self, partial: str, line: int, column: int):
         super().__init__(
@@ -62,6 +93,8 @@ class UnterminatedStringError(LexicalError):
 class UnterminatedCommentError(LexicalError):
     """Disparado quando um comentário de bloco /* ... não é fechado com */."""
 
+    code = "UNTERMINATED_BLOCK_COMMENT"
+
     def __init__(self, line: int, column: int):
         super().__init__(
             "comentário de bloco não terminado (faltando '*/')",
@@ -71,6 +104,8 @@ class UnterminatedCommentError(LexicalError):
 
 class UnterminatedCharError(LexicalError):
     """Disparado quando um literal de caractere '...' não é fechado corretamente."""
+
+    code = "UNTERMINATED_CHAR_LITERAL"
 
     def __init__(self, partial: str, line: int, column: int):
         super().__init__(
