@@ -1,0 +1,10 @@
+{
+  "python.analysis.extraPaths": [
+    "./",
+    "./ProjetoMiniC"
+  ],
+  "python.autoComplete.extraPaths": [
+    "./",
+    "./ProjetoMiniC"
+  ]
+}
