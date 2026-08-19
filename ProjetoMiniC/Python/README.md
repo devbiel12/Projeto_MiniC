@@ -1,10 +1,10 @@
 # MiniC em Python
 
-Este diretório contém a implementação do compilador MiniC em Python, focada inicialmente na etapa de análise léxica.
+Este diretório contém a implementação do compilador MiniC em Python. O trabalho está focado principalmente na etapa de análise léxica, com uma interface gráfica para facilitar testes e exportação dos resultados.
 
 ## Objetivo
 
-O projeto identifica e classifica os elementos do código-fonte em tokens, além de detectar erros léxicos, como:
+O projeto identifica e classifica os elementos do código-fonte em tokens e detecta erros léxicos, por exemplo:
 
 - símbolos inválidos
 - strings não fechadas
@@ -13,7 +13,7 @@ O projeto identifica e classifica os elementos do código-fonte em tokens, além
 
 ## Estrutura principal
 
-```text
+```
 src/
 ├── lexer/
 │   ├── __init__.py
@@ -32,57 +32,93 @@ src/
 └── __init__.py
 ```
 
+## Launcher gráfico
+
+Adicionei um launcher simples em `main.py` que fornece uma janela inicial com botões para as principais etapas do compilador:
+
+- `Analise Léxico` — inicia o módulo `src.lexer` em um processo separado (abre a interface do lexer);
+- `Gerador de IR`, `Analise Sintaxe`, `Analise Semantica`, `Gerador de Codigo`, `Otimizador` — atualmente exibem placeholders; podem ser ligados a pontos de entrada assim que implementados.
+
+O launcher facilita testes locais e serve como ponto único para iniciar cada fase do projeto.
+
+## Dependências
+
+- Python 3.8+ (recomendado 3.10+)
+- `tkinter` (está incluído na maioria das distribuições do Python; no Linux pode ser necessário instalar o pacote do sistema, por exemplo `sudo apt install python3-tk`).
+
 ## Como executar
 
-No diretório do projeto Python:
+Abra um terminal no diretório deste README (a raiz do projeto Python) e use um dos comandos abaixo:
+
+Windows (com o lançador do Python):
 
 ```powershell
-cd "C:\Users\guilherme.lima\OneDrive - Alpargatas S.A\Documentos\GitHub\Projeto_MiniC\ProjetoMiniC\Python"
-uv python install 3.12
-uv run python -m src.lexer
+py -3 main.py
 ```
 
-O módulo `src.lexer` também pode ser executado diretamente para testes rápidos de texto, arquivos individuais, seleção múltipla de arquivos ou uma pasta inteira de MiniC.
+Ou, se `python` estiver no PATH:
+
+```powershell
+python main.py
+```
+
+Isso abre a janela launcher; clique em "Analise Léxico" para iniciar a interface do lexer.
+
+Também é possível executar apenas o módulo do lexer diretamente:
+
+```powershell
+py -3 -m src.lexer
+# ou
+python -m src.lexer
+```
 
 ## Interface gráfica do lexer
 
-O ponto de entrada do módulo em `src.lexer` foi convertido para uma interface em Tkinter, permitindo:
+O módulo `src.lexer` contém uma interface em Tkinter que permite:
 
-- executar os testes já criados;
+- executar os testes de demonstração;
 - escrever código diretamente na interface;
 - abrir um arquivo `.minic`, `.mc` ou `.c` para análise;
-- abrir vários arquivos de uma vez ou uma pasta inteira com arquivos MiniC;
-- navegar entre as análises carregadas por uma lista lateral;
+- abrir múltiplos arquivos ou uma pasta inteira contendo fontes MiniC;
+- navegar entre análises carregadas por uma lista lateral;
 - visualizar a saída formatada, o JSONL acadêmico e o JSONL de erros em abas separadas;
-- exportar o JSONL acadêmico em arquivo `.jsonl`;
-- exportar em lote um JSONL por arquivo quando vários arquivos forem analisados;
-- copiar o JSONL acadêmico para a área de transferência;
-- acompanhar um resumo de status na própria interface.
+- exportar o JSONL em arquivo `.jsonl` e em lote;
+- copiar o JSONL para a área de transferência;
+- visualizar um resumo de status na interface.
 
-## O que a execução mostra
+## Testes
 
-Ao rodar o módulo, o programa executa uma série de testes de validação do lexer, incluindo:
+O repositório contém testes básicos para o scanner (pasta `tests/`). Para executar os testes com `pytest`:
 
-1. código válido
-2. código com símbolos inválidos e string não fechada
-3. código com operadores lógicos e comentário de bloco sem fechar
+```powershell
+py -3 -m pytest -q
+```
 
-Além disso, é possível testar qualquer texto manualmente ou importar um arquivo do usuário para análise.
+## Módulos do lexer (resumo)
 
-Quando uma pasta ou múltiplos arquivos são carregados, a interface mantém cada análise separada, facilita a navegação lateral e permite exportar todos os resultados em lote sem alterar a saída visual principal.
-
-## Módulos do lexer
-
-- `token_types.py`: define os tipos de token da linguagem
-- `tokens.py`: estrutura os objetos Token
-- `errors.py`: define as exceções e mensagens de erro léxico
-- `scanner.py`: percorre o código-fonte e identifica cada token
-- `demo.py`: contém os testes de demonstração
-- `__main__.py`: ponto de entrada para execução do módulo, com suporte a interface gráfica
+- `token_types.py`: definição dos tipos de token
+- `tokens.py`: modelo de `Token`
+- `errors.py`: classes de erro e mensagens diagnósticas
+- `scanner.py`: lógica de análise léxica (scanner)
+- `demo.py`: códigos de teste/demonstração
+- `__main__.py`: ponto de entrada do pacote `src.lexer` (contém a interface)
 
 ## Próximos passos
 
-- implementar o parser
-- construir a árvore sintática
-- validar regras semânticas
-- gerar código intermediário ou final
+- implementar o parser e expor um entrypoint para `src.parser`;
+- construir a árvore sintática (AST) e salvar exemplos de saída;
+- implementar a análise semântica e gerar mensagens de diagnóstico;
+- adicionar gerador de IR e gerador de código final;
+- integrar o otimizador e criar modos de execução em pipeline.
+
+Contribuições e melhorias são bem-vindas — abra uma issue ou envie um pull request com sugestões.
+
+## Screenshots
+
+Launcher (painel principal):
+
+![Launcher](screenshots/launcher.svg)
+
+Interface do lexer (exemplo):
+
+![Lexer UI](screenshots/lexer_ui.svg)
