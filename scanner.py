@@ -25,9 +25,9 @@ if len(sys.argv) > 1:
             break
 
 try:
-    from src.lexer.scanner import Scanner, main
-except ModuleNotFoundError:
-    from ProjetoMiniC.src.lexer.scanner import Scanner, main
+    from src.lexer.scanner import Scanner, main  # type: ignore
+except (ModuleNotFoundError, ImportError):
+    from ProjetoMiniC.src.lexer.scanner import Scanner, main  # type: ignore
 
 if __name__ == "__main__":
     sys.exit(main())
