@@ -5,7 +5,7 @@ Ponto de entrada raiz com resolução automática para subpastas.
 """
 
 import sys
-from pathlib import Path
+from pathlib import Path 
 
 # Adiciona a subpasta ProjetoMiniC ao sys.path
 DIRETORIO_RAIZ = Path(__file__).resolve().parent
