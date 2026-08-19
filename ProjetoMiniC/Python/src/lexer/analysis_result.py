@@ -20,7 +20,6 @@ class AnalysisResult:
     tokens: list[Token]
     errors: list[LexicalError]
 
-
 @dataclass(slots=True)
 class AnalysisView:
     """Representa uma análise pronta para exibição e exportação."""
