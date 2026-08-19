@@ -4,16 +4,23 @@
 #include "token.h"
 #include "errors.h"
 #include <stdbool.h>
+#include <stddef.h>
 
 /* Estrutura principal do analisador léxico em C */
 typedef struct {
     const char *source;
-    int length;
-    int pos;
+    size_t length;
+    size_t pos;
     int line;
     int column;
-    TokenList tokens;
-    ErrorList errors;
+
+    Token *tokens;
+    size_t tokens_len;
+    size_t tokens_cap;
+
+    LexicalError *errors;
+    size_t errors_len;
+    size_t errors_cap;
 } Scanner;
 
 /* Inicialização e liberação do scanner */

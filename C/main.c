@@ -8,22 +8,46 @@
 #include "errors.h"
 #include "util.h"
 
+/* Função auxiliar para imprimir strings escapadas no padrão JSON */
+static void print_json_escaped_string(FILE *stream, const char *str) {
+    if (!str) {
+        fputs("null", stream);
+        return;
+    }
+    fputc('"', stream);
+    for (size_t i = 0; str[i] != '\0'; i++) {
+        switch (str[i]) {
+            case '\\': fputs("\\\\", stream); break;
+            case '"':  fputs("\\\"", stream); break;
+            case '\n': fputs("\\n", stream); break;
+            case '\r': fputs("\\r", stream); break;
+            case '\t': fputs("\\t", stream); break;
+            default:   fputc(str[i], stream); break;
+        }
+    }
+    fputc('"', stream);
+}
+
 /* Serialização de um Token individual para formato JSONL */
-static void print_tokens_jsonl(const Token *tokens, size_t count) {
+static void print_tokens_jsonl(const Token *tokens, size_t count, FILE *stream) {
     for (size_t i = 0; i < count; i++) {
         const Token *t = &tokens[i];
-        printf("{\"token\": \"%s\", \"lexeme\": \"%s\", ", tok_type_name(t->type), t->lexeme);
+        fprintf(stream, "{\"token\": \"%s\", \"lexeme\": ", token_type_name(t->type));
+        print_json_escaped_string(stream, t->lexeme);
+        fprintf(stream, ", ");
         
         if (t->attribute && strlen(t->attribute) > 0) {
-            if (t->type == TOK_NUM_INT || t->type == TOK_NUM_FLOAT) {
-                printf("\"attribute\": %s, ", t->attribute);
+            if (t->type == NUM_INT || t->type == NUM_FLOAT) {
+                fprintf(stream, "\"attribute\": %s, ", t->attribute);
             } else {
-                printf("\"attribute\": \"%s\", ", t->attribute);
+                fprintf(stream, "\"attribute\": ");
+                print_json_escaped_string(stream, t->attribute);
+                fprintf(stream, ", ");
             }
         } else {
-            printf("\"attribute\": null, ");
+            fprintf(stream, "\"attribute\": null, ");
         }
-        printf("\"line\": %d, \"column\": %d}\n", t->line, t->column);
+        fprintf(stream, "\"line\": %d, \"column\": %d}\n", t->line, t->column);
     }
 }
 
@@ -31,8 +55,9 @@ static void print_tokens_jsonl(const Token *tokens, size_t count) {
 static void print_errors_jsonl(const LexicalError *errors, size_t count, FILE *stream) {
     for (size_t i = 0; i < count; i++) {
         const LexicalError *e = &errors[i];
-        fprintf(stream, "{\"error\": \"%s\", \"lexeme\": \"%s\", \"line\": %d, \"column\": %d}\n",
-                error_code_name(e->code), e->lexeme, e->line, e->column);
+        fprintf(stream, "{\"error\": \"%s\", \"lexeme\": ", error_code_name(e->code));
+        print_json_escaped_string(stream, e->lexeme);
+        fprintf(stream, ", \"line\": %d, \"column\": %d}\n", e->line, e->column);
     }
 }
 
@@ -65,7 +90,7 @@ int main(int argc, char *argv[]) {
 
     /* Modo estrito: emite apenas o stream JSONL */
     if (modo_apenas_jsonl) {
-        print_tokens_jsonl(scanner.tokens, scanner.tokens_len);
+        print_tokens_jsonl(scanner.tokens, scanner.tokens_len, stdout);
         if (scanner_has_errors(&scanner)) {
             print_errors_jsonl(scanner.errors, scanner.errors_len, stderr);
         }
@@ -92,7 +117,7 @@ int main(int argc, char *argv[]) {
 
     printf("--------------------------------------------------------------------------------\n");
     printf("Saída JSONL (Tokens):\n");
-    print_tokens_jsonl(scanner.tokens, scanner.tokens_len);
+    print_tokens_jsonl(scanner.tokens, scanner.tokens_len, stdout);
 
     if (scanner_has_errors(&scanner)) {
         printf("--------------------------------------------------------------------------------\n");

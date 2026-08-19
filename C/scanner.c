@@ -119,7 +119,7 @@ static void scan_number(Scanner *s, int line, int col, char first_digit) {
     }
     buffer[len] = '\0';
 
-    // Identificador inválido iniciado por dígito
+    /* Identificador inválido iniciado por dígito */
     if (!at_end(s) && (isalpha((unsigned char)peek(s, 0)) || peek(s, 0) == '_')) {
         char letters[256];
         int l_len = 0;
@@ -138,7 +138,7 @@ static void scan_number(Scanner *s, int line, int col, char first_digit) {
         return;
     }
 
-    // Número real malformado ou válido
+    /* Número real malformado ou válido */
     if (peek(s, 0) == '.') {
         if (!isdigit((unsigned char)peek(s, 1))) {
             int dot_col = s->column;
@@ -189,12 +189,6 @@ static void scan_string(Scanner *s, int line, int col) {
         char err_lex[1028];
         snprintf(err_lex, sizeof(err_lex), "\"%s", buffer);
         add_error(s, make_unterminated_string_error(err_lex, line, col));
-        
-        while (len > 0 && (buffer[len - 1] == ')' || buffer[len - 1] == ';' || buffer[len - 1] == '}' || buffer[len - 1] == ']')) {
-            s->pos--;
-            s->column--;
-            len--;
-        }
     }
 }
 
@@ -214,7 +208,6 @@ static void scan_char(Scanner *s, int line, int col) {
         char lexeme[8];
         snprintf(lexeme, sizeof(lexeme), "'%c", ch);
         add_error(s, make_unterminated_char_error(lexeme, line, col));
-        if (peek(s, 0) == ';') advance(s);
     }
 }
 
@@ -239,7 +232,13 @@ static void scan_token_item(Scanner *s) {
         int start_pos = (int)s->pos - 2;
         while (true) {
             if (at_end(s)) {
-                add_error(s, make_unterminated_comment_error(&s->source[start_pos], start_line, start_col));
+                size_t comm_len = s->pos - start_pos;
+                char *comm_buf = (char *)xmalloc(comm_len + 1);
+                strncpy(comm_buf, &s->source[start_pos], comm_len);
+                comm_buf[comm_len] = '\0';
+
+                add_error(s, make_unterminated_comment_error(comm_buf, start_line, start_col));
+                free(comm_buf);
                 return;
             }
             if (peek(s, 0) == '*' && peek(s, 1) == '/') {
@@ -313,7 +312,7 @@ void scanner_scan_tokens(Scanner *s) {
     add_token(s, TOK_EOF, "", s->line, s->column, NULL);
 }
 
-int scanner_has_errors(const Scanner *s) {
+bool scanner_has_errors(const Scanner *s) {
     return s->errors_len > 0;
 }
 
