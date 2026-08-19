@@ -1,8 +1,8 @@
-"""runner de fixtures para o scanner MiniC.
+"""Runner de fixtures para o scanner MiniC.
 
 Procura arquivos ``*.expected.jsonl`` e tenta localizar a entrada irmã
 com o mesmo nome-base no mesmo diretório. A comparação é feita em JSONL
-canônico, com tokens e diagnósticos serializados a partir do scanner.
+acadêmico, com tokens e diagnósticos serializados a partir do scanner.
 """
 
 from __future__ import annotations
@@ -13,76 +13,15 @@ import json
 from pathlib import Path
 from typing import Iterable, List, Sequence
 
+from .jsonl_serializer import serialize_tokens_jsonl
 from .scanner import Scanner
 
 
-INPUT_SUFFIXES: Sequence[str] = (".minic", ".mc", ".txt", ".c", ".py", "")
-
-
-def _serialize_actual(scanner: Scanner) -> List[dict]:
-    records: List[dict] = []
-    error_index = 0
-
-    for token in scanner.tokens:
-        if token.type.name == "ERROR" and error_index < len(scanner.errors):
-            error = scanner.errors[error_index]
-            error_index += 1
-            records.append(
-                {
-                    "kind": "diagnostic",
-                    "code": error.code,
-                    "message": error.message,
-                    "line": error.line,
-                    "column": error.column,
-                    "lexeme": error.lexeme,
-                }
-            )
-            continue
-
-        records.append({"kind": "token", **token.as_record()})
-
-    return records
-
-
-def _normalize_expected(records: Iterable[dict]) -> List[dict]:
-    normalized: List[dict] = []
-    for record in records:
-        if not isinstance(record, dict):
-            normalized.append({"kind": "raw", "value": record})
-            continue
-
-        if record.get("kind") == "diagnostic" or "code" in record:
-            normalized.append(
-                {
-                    "kind": "diagnostic",
-                    "code": record.get("code") or record.get("type") or record.get("name"),
-                    "message": record.get("message", ""),
-                    "line": record.get("line"),
-                    "column": record.get("column"),
-                    "lexeme": record.get("lexeme", ""),
-                }
-            )
-        else:
-            normalized.append(
-                {
-                    "kind": record.get("kind", "token"),
-                    "type": record.get("type"),
-                    "lexeme": record.get("lexeme", ""),
-                    "line": record.get("line"),
-                    "column": record.get("column"),
-                    "attribute": record.get("attribute"),
-                }
-            )
-
-    return normalized
+INPUT_SUFFIXES: Sequence[str] = (".minic", ".mc", ".c", "")
 
 
 def _read_jsonl(path: Path) -> List[dict]:
-    lines: List[dict] = []
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        if raw_line.strip():
-            lines.append(json.loads(raw_line))
-    return lines
+    return [json.loads(raw_line) for raw_line in path.read_text(encoding="utf-8").splitlines() if raw_line.strip()]
 
 
 def _write_jsonl(records: Iterable[dict]) -> str:
@@ -119,26 +58,62 @@ def run_fixture(expected_file: Path, input_file: Path, root: Path) -> bool:
     scanner = Scanner(source)
     scanner.scan_tokens()
 
-    actual_records = _serialize_actual(scanner)
-    actual_text = _write_jsonl(actual_records)
+    actual_text = serialize_tokens_jsonl(scanner.tokens)
+    actual_records = _read_jsonl_text(actual_text)
 
-    expected_records = _normalize_expected(_read_jsonl(expected_file))
+    expected_records = _read_jsonl(expected_file)
     expected_text = _write_jsonl(expected_records)
 
     if actual_records == expected_records:
-        print(f"PASS {expected_file.relative_to(root)}")
-        return True
+        expected_errors_file = _candidate_errors_file(expected_file)
+        if expected_errors_file is None:
+            print(f"PASS {expected_file.relative_to(root)}")
+            return True
+
+        actual_errors_text = _write_jsonl(_read_jsonl_text_errors(scanner.errors))
+        expected_errors_records = _read_jsonl(expected_errors_file)
+        expected_errors_text = _write_jsonl(expected_errors_records)
+        if _read_jsonl_text(actual_errors_text) == expected_errors_records:
+            print(f"PASS {expected_file.relative_to(root)}")
+            return True
+
+        print(f"FAIL {expected_errors_file.relative_to(root)}")
+        print(
+            _diff_lines(
+                expected_errors_text,
+                actual_errors_text,
+                expected_errors_file.name,
+                f"{input_file.stem}.errors.actual.jsonl",
+            )
+        )
+        return False
 
     print(f"FAIL {expected_file.relative_to(root)}")
-    print(
-        _diff_lines(
-            expected_text,
-            actual_text,
-            expected_file.name,
-            f"{input_file.stem}.actual.jsonl",
-        )
-    )
+    print(_diff_lines(expected_text, actual_text, expected_file.name, f"{input_file.stem}.actual.jsonl"))
+
     return False
+
+
+def _read_jsonl_text(text: str) -> List[dict]:
+    return [json.loads(raw_line) for raw_line in text.splitlines() if raw_line.strip()]
+
+
+def _read_jsonl_text_errors(errors: list) -> List[dict]:
+    return [json.loads(raw_line) for raw_line in _write_jsonl(
+        {"error": error.code, "lexeme": error.lexeme, "line": error.line, "column": error.column}
+        for error in errors
+    ).splitlines() if raw_line.strip()]
+
+
+def _candidate_errors_file(expected_file: Path) -> Path | None:
+    candidates = [
+        expected_file.with_name(expected_file.name.replace(".expected.jsonl", ".errors.jsonl")),
+        expected_file.with_name(expected_file.name.replace(".expected.jsonl", ".expected.errors.jsonl")),
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def discover_fixtures(root: Path) -> List[tuple[Path, Path]]:

@@ -14,6 +14,7 @@ Depende de `token_types.py`, `tokens.py` e `errors.py`.
 
 from typing import Dict, List, Optional, Union
 
+from .analysis_result import AnalysisResult
 from .errors import (
     InvalidSymbolError,
     InvalidIdentifierError,
@@ -111,6 +112,12 @@ class Scanner:
             self._scan_token()
         self.tokens.append(Token(TokenType.EOF, "", self.line, self.column, None))
         return self.tokens
+
+    def analyze(self) -> AnalysisResult:
+        """Executa a análise léxica e devolve tokens e erros agrupados."""
+
+        self.scan_tokens()
+        return AnalysisResult(tokens=self.tokens, errors=self.errors)
 
     def _skip_whitespace(self) -> None:
         while not self._at_end() and self._peek() in " \t\r\n":
