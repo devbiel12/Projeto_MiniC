@@ -103,8 +103,8 @@ static void scan_identifier(Scanner *s, int line, int col, char first_char) {
     }
     buffer[len] = '\0';
 
-    TokenType type = tok_type_lookup_reserved(buffer);
-    const char *attr = (type == TOK_IDENT) ? buffer : NULL;
+    TokenType type = lookup_reserved_word(buffer);
+    const char *attr = (type == ID) ? buffer : NULL;
     add_token(s, type, buffer, line, col, attr);
 }
 
@@ -133,8 +133,8 @@ static void scan_number(Scanner *s, int line, int col, char first_digit) {
         char full_inv[512];
         snprintf(full_inv, sizeof(full_inv), "%s%s", buffer, letters);
         add_error(s, make_invalid_identifier_error(full_inv, line, col));
-        add_token(s, TOK_NUM_INT, buffer, line, col, buffer);
-        add_token(s, TOK_IDENT, letters, line, l_col, letters);
+        add_token(s, NUM_INT, buffer, line, col, buffer);
+        add_token(s, ID, letters, line, l_col, letters);
         return;
     }
 
@@ -146,8 +146,8 @@ static void scan_number(Scanner *s, int line, int col, char first_digit) {
             char malformed[260];
             snprintf(malformed, sizeof(malformed), "%s.", buffer);
             add_error(s, make_malformed_real_literal_error(malformed, line, col));
-            add_token(s, TOK_NUM_INT, buffer, line, col, buffer);
-            add_token(s, TOK_DOT, ".", line, dot_col, NULL);
+            add_token(s, NUM_INT, buffer, line, col, buffer);
+            add_token(s, DOT, ".", line, dot_col, NULL);
             return;
         }
 
@@ -157,11 +157,11 @@ static void scan_number(Scanner *s, int line, int col, char first_digit) {
             else advance(s);
         }
         buffer[len] = '\0';
-        add_token(s, TOK_NUM_FLOAT, buffer, line, col, buffer);
+        add_token(s, NUM_FLOAT, buffer, line, col, buffer);
         return;
     }
 
-    add_token(s, TOK_NUM_INT, buffer, line, col, buffer);
+    add_token(s, NUM_INT, buffer, line, col, buffer);
 }
 
 static void scan_string(Scanner *s, int line, int col) {
@@ -184,7 +184,7 @@ static void scan_string(Scanner *s, int line, int col) {
     if (closed) {
         char lexeme[1028];
         snprintf(lexeme, sizeof(lexeme), "\"%s\"", buffer);
-        add_token(s, TOK_STRING_LIT, lexeme, line, col, buffer);
+        add_token(s, STRING, lexeme, line, col, buffer);
     } else {
         char err_lex[1028];
         snprintf(err_lex, sizeof(err_lex), "\"%s", buffer);
@@ -209,7 +209,7 @@ static void scan_char(Scanner *s, int line, int col) {
         char lexeme[8];
         char attr[4] = {ch, '\0'};
         snprintf(lexeme, sizeof(lexeme), "'%c'", ch);
-        add_token(s, TOK_CHAR_LIT, lexeme, line, col, attr);
+        add_token(s, CHAR_LITERAL, lexeme, line, col, attr);
     } else {
         char lexeme[8];
         snprintf(lexeme, sizeof(lexeme), "'%c", ch);
@@ -236,9 +236,10 @@ static void scan_token_item(Scanner *s) {
         while (!at_end(s) && peek(s, 0) != '\n') advance(s);
     } else if (ch == '/' && peek(s, 0) == '*') {
         advance(s);
+        int start_pos = (int)s->pos - 2;
         while (true) {
             if (at_end(s)) {
-                add_error(s, make_unterminated_comment_error(start_line, start_col));
+                add_error(s, make_unterminated_comment_error(&s->source[start_pos], start_line, start_col));
                 return;
             }
             if (peek(s, 0) == '*' && peek(s, 1) == '/') {
@@ -250,45 +251,45 @@ static void scan_token_item(Scanner *s) {
         }
     } else {
         switch (ch) {
-            case '+': add_token(s, TOK_PLUS, "+", start_line, start_col, NULL); break;
-            case '-': add_token(s, TOK_MINUS, "-", start_line, start_col, NULL); break;
-            case '*': add_token(s, TOK_STAR, "*", start_line, start_col, NULL); break;
-            case '/': add_token(s, TOK_SLASH, "/", start_line, start_col, NULL); break;
-            case '%': add_token(s, TOK_PERCENT, "%", start_line, start_col, NULL); break;
-            case '.': add_token(s, TOK_DOT, ".", start_line, start_col, NULL); break;
-            case ';': add_token(s, TOK_SEMICOLON, ";", start_line, start_col, NULL); break;
-            case ',': add_token(s, TOK_COMMA, ",", start_line, start_col, NULL); break;
-            case '(': add_token(s, TOK_LPAREN, "(", start_line, start_col, NULL); break;
-            case ')': add_token(s, TOK_RPAREN, ")", start_line, start_col, NULL); break;
-            case '{': add_token(s, TOK_LBRACE, "{", start_line, start_col, NULL); break;
-            case '}': add_token(s, TOK_RBRACE, "}", start_line, start_col, NULL); break;
-            case '[': add_token(s, TOK_LBRACKET, "[", start_line, start_col, NULL); break;
-            case ']': add_token(s, TOK_RBRACKET, "]", start_line, start_col, NULL); break;
+            case '+': add_token(s, PLUS, "+", start_line, start_col, NULL); break;
+            case '-': add_token(s, MINUS, "-", start_line, start_col, NULL); break;
+            case '*': add_token(s, STAR, "*", start_line, start_col, NULL); break;
+            case '/': add_token(s, SLASH, "/", start_line, start_col, NULL); break;
+            case '%': add_token(s, PERCENT, "%", start_line, start_col, NULL); break;
+            case '.': add_token(s, DOT, ".", start_line, start_col, NULL); break;
+            case ';': add_token(s, SEMI, ";", start_line, start_col, NULL); break;
+            case ',': add_token(s, COMMA, ",", start_line, start_col, NULL); break;
+            case '(': add_token(s, LPAREN, "(", start_line, start_col, NULL); break;
+            case ')': add_token(s, RPAREN, ")", start_line, start_col, NULL); break;
+            case '{': add_token(s, LBRACE, "{", start_line, start_col, NULL); break;
+            case '}': add_token(s, RBRACE, "}", start_line, start_col, NULL); break;
+            case '[': add_token(s, LBRACKET, "[", start_line, start_col, NULL); break;
+            case ']': add_token(s, RBRACKET, "]", start_line, start_col, NULL); break;
             case '=':
-                if (match(s, '=')) add_token(s, TOK_EQ, "==", start_line, start_col, NULL);
-                else add_token(s, TOK_ASSIGN, "=", start_line, start_col, NULL);
+                if (match(s, '=')) add_token(s, EQ, "==", start_line, start_col, NULL);
+                else add_token(s, ASSIGN, "=", start_line, start_col, NULL);
                 break;
             case '!':
-                if (match(s, '=')) add_token(s, TOK_NEQ, "!=", start_line, start_col, NULL);
-                else add_token(s, TOK_NOT, "!", start_line, start_col, NULL);
+                if (match(s, '=')) add_token(s, NEQ, "!=", start_line, start_col, NULL);
+                else add_token(s, NOT, "!", start_line, start_col, NULL);
                 break;
             case '<':
-                if (match(s, '=')) add_token(s, TOK_LE, "<=", start_line, start_col, NULL);
-                else add_token(s, TOK_LT, "<", start_line, start_col, NULL);
+                if (match(s, '=')) add_token(s, LE, "<=", start_line, start_col, NULL);
+                else add_token(s, LT, "<", start_line, start_col, NULL);
                 break;
             case '>':
-                if (match(s, '=')) add_token(s, TOK_GE, ">=", start_line, start_col, NULL);
-                else add_token(s, TOK_GT, ">", start_line, start_col, NULL);
+                if (match(s, '=')) add_token(s, GE, ">=", start_line, start_col, NULL);
+                else add_token(s, GT, ">", start_line, start_col, NULL);
                 break;
             case '&':
-                if (match(s, '&')) add_token(s, TOK_AND, "&&", start_line, start_col, NULL);
+                if (match(s, '&')) add_token(s, AND, "&&", start_line, start_col, NULL);
                 else {
                     char str[2] = {ch, '\0'};
                     add_error(s, make_invalid_symbol_error(str, start_line, start_col));
                 }
                 break;
             case '|':
-                if (match(s, '|')) add_token(s, TOK_OR, "||", start_line, start_col, NULL);
+                if (match(s, '|')) add_token(s, OR, "||", start_line, start_col, NULL);
                 else {
                     char str[2] = {ch, '\0'};
                     add_error(s, make_invalid_symbol_error(str, start_line, start_col));
@@ -317,8 +318,8 @@ int scanner_has_errors(const Scanner *s) {
 }
 
 void scanner_print_tokens(const Scanner *s) {
-    printf("%-14s%-26s%-7s%-8s%s\n", "TIPO", "LEXEMA", "LINHA", "COLUNA", "ATRIBUTO");
-    printf("---------------------------------------------------------------\n");
+    printf("%-18s%-26s%-7s%-8s%s\n", "TIPO", "LEXEMA", "LINHA", "COLUNA", "ATRIBUTO");
+    printf("---------------------------------------------------------------------------\n");
     for (size_t i = 0; i < s->tokens_len; i++) {
         const Token *t = &s->tokens[i];
         char repr[64];
@@ -330,8 +331,8 @@ void scanner_print_tokens(const Scanner *s) {
             repr[24] = '\'';
             repr[25] = '\0';
         }
-        printf("%-14s%-26s%-7d%-8d%s\n",
-               tok_type_name(t->type),
+        printf("%-18s%-26s%-7d%-8d%s\n",
+               token_type_name(t->type),
                repr,
                t->line,
                t->column,
@@ -341,13 +342,13 @@ void scanner_print_tokens(const Scanner *s) {
 
 void scanner_print_errors(const Scanner *s) {
     if (s->errors_len == 0) {
-        printf("Nenhum erro lexico encontrado.\n");
+        printf("Nenhum erro léxico encontrado.\n");
         return;
     }
-    printf("%zu erro(s) lexico(s) encontrado(s):\n", s->errors_len);
+    printf("%zu erro(s) léxico(s) encontrado(s):\n", s->errors_len);
     for (size_t i = 0; i < s->errors_len; i++) {
         char *diag = error_diagnostic(&s->errors[i]);
-        printf("  [ERRO LEXICO] %s\n", diag);
+        printf("  [ERRO LÉXICO] %s\n", diag);
         free(diag);
     }
 }

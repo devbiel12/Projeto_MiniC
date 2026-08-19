@@ -4,7 +4,6 @@
 #include "errors.h"
 #include "util.h"
 
-/* Mapeamento exato dos nomes dos códigos de erro para o padrão JSONL */
 const char *error_code_name(ErrorCode code) {
     switch (code) {
         case ERR_UNKNOWN_SYMBOL:
@@ -16,9 +15,9 @@ const char *error_code_name(ErrorCode code) {
         case ERR_UNTERMINATED_STRING_LITERAL:
             return "CADEIA_NAO_TERMINADA";
         case ERR_UNTERMINATED_BLOCK_COMMENT:
-            return "COMENTARIO_NAO_TERMINADO";
+            return "COMENTARIO_NAO_FECHADO";
         case ERR_UNTERMINATED_CHAR_LITERAL:
-            return "CARACTERE_NAO_TERMINADO";
+            return "LITERAL_CHAR_MAL_FORMADO";
         default:
             return "ERRO_LEXICO";
     }
@@ -35,18 +34,11 @@ LexicalError error_create(ErrorCode code, const char *message, int line, int col
 }
 
 void error_free(LexicalError *err) {
-    if (err->message) {
-        free(err->message);
-        err->message = NULL;
-    }
-    if (err->lexeme) {
-        free(err->lexeme);
-        err->lexeme = NULL;
-    }
+    if (err->message) { free(err->message); err->message = NULL; }
+    if (err->lexeme) { free(err->lexeme); err->lexeme = NULL; }
 }
 
 char *error_diagnostic(const LexicalError *err) {
-    /* Formato exato do Python: "linha X, coluna Y: <mensagem> proximo de '<lexema>'" */
     char origem[512];
     if (err->lexeme && err->lexeme[0] != '\0') {
         snprintf(origem, sizeof(origem), " proximo de '%s'", err->lexeme);
@@ -83,9 +75,9 @@ LexicalError make_unterminated_string_error(const char *partial, int line, int c
         "cadeia de caracteres nao terminada (faltando aspas de fechamento)", line, column, partial);
 }
 
-LexicalError make_unterminated_comment_error(int line, int column) {
+LexicalError make_unterminated_comment_error(const char *partial, int line, int column) {
     return error_create(ERR_UNTERMINATED_BLOCK_COMMENT,
-        "comentario de bloco nao terminado (faltando '*/')", line, column, "");
+        "comentario de bloco nao terminado (faltando '*/')", line, column, partial);
 }
 
 LexicalError make_unterminated_char_error(const char *partial, int line, int column) {
