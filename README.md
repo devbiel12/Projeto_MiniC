@@ -16,31 +16,7 @@ O objetivo do projeto é desenvolver uma ferramenta para análise de código em 
 
 O projeto está organizado em subpastas por linguagem e por módulos do compilador. A parte em Python já contém a estrutura base do lexer, além de uma interface em Tkinter para testar a análise léxica com diferentes entradas.
 
-## Estrutura do repositório
 
-```text
-Projeto_MiniC/
-├── README.md
-├── ProjetoMiniC/
-│   ├── Python/
-│   │   ├── README.md
-│   │   ├── src/
-│   │   │   ├── lexer/
-│   │   │   │   ├── __main__.py
-│   │   │   │   ├── demo.py
-│   │   │   │   ├── scanner.py
-│   │   │   │   ├── token_types.py
-│   │   │   │   ├── tokens.py
-│   │   │   │   └── errors.py
-│   │   │   ├── parser/
-│   │   │   ├── semantic/
-│   │   │   ├── ast/
-│   │   │   ├── codegen/
-│   │   │   ├── ir/
-│   │   │   └── optimizer/
-│   │   └── docs/
-│   └── C/
-```
 
 ## Executando a versão em Python
 
