@@ -176,7 +176,7 @@ def iniciar_gui() -> int:
             frame.pack(expand=True)
 
             botoes = [
-                ("Analise Léxico", lambda: _launch_module("src.lexer")),
+                ("Analise Léxico", lambda: _launch_module("ProjetoMiniC.src.lexer")),
                 ("Gerador de IR", lambda: messagebox.showinfo("Em desenvolvimento", "Gerador de IR ainda não implementado.")),
                 ("Analise Sintaxe", lambda: messagebox.showinfo("Em desenvolvimento", "Análise de sintaxe ainda não implementada.")),
                 ("Analise Semantica", lambda: messagebox.showinfo("Em desenvolvimento", "Análise semântica ainda não implementada.")),
