@@ -1,9 +1,8 @@
 """
 scanner.py
 ==========
-
-Implementação do analisador léxico manual (autômato determinístico).
-Compatível com Python 3.8+ em qualquer ambiente.
+Mecanismo principal de análise léxica (Scanner). Converte o código fonte
+em uma lista sequencial de tokens e identifica violações sintáticas/léxicas.
 """
 
 from __future__ import annotations
@@ -12,43 +11,45 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
-# Permite importação direta quando executado como script isolado
 DIRETORIO_ATUAL = Path(__file__).resolve().parent
 if str(DIRETORIO_ATUAL) not in sys.path:
     sys.path.insert(0, str(DIRETORIO_ATUAL))
 
 try:
-    from .analysis_result import AnalysisResult
+    from .analysis_result import ResultadoAnalise
     from .errors import (
-        InvalidIdentifierError,
-        InvalidSymbolError,
-        LexicalError,
-        MalformedRealLiteralError,
-        UnterminatedCharError,
-        UnterminatedCommentError,
-        UnterminatedStringError,
+        ErroCaractereNaoTerminado,
+        ErroCadeiaNaoTerminada,
+        ErroComentarioNaoTerminado,
+        ErroIdentificadorInvalido,
+        ErroLexico,
+        ErroLiteralRealMalformado,
+        ErroSimboloInvalido,
     )
     from .jsonl_serializer import serialize_errors_jsonl, serialize_tokens_jsonl
-    from .token_types import RESERVED_WORDS, TokenType
+    from .token_types import PALAVRAS_RESERVADAS, TokenType
     from .tokens import Token
 except (ImportError, ValueError):
-    from ProjetoMiniC.src.lexer.analysis_result import AnalysisResult
+    from ProjetoMiniC.src.lexer.analysis_result import ResultadoAnalise
     from ProjetoMiniC.src.lexer.errors import (
-        InvalidIdentifierError,
-        InvalidSymbolError,
-        LexicalError,
-        MalformedRealLiteralError,
-        UnterminatedCharError,
-        UnterminatedCommentError,
-        UnterminatedStringError,
+        ErroCaractereNaoTerminado,
+        ErroCadeiaNaoTerminada,
+        ErroComentarioNaoTerminado,
+        ErroIdentificadorInvalido,
+        ErroLexico,
+        ErroLiteralRealMalformado,
+        ErroSimboloInvalido,
     )
     from ProjetoMiniC.src.lexer.jsonl_serializer import serialize_errors_jsonl, serialize_tokens_jsonl
-    from ProjetoMiniC.src.lexer.token_types import RESERVED_WORDS, TokenType
+    from ProjetoMiniC.src.lexer.token_types import PALAVRAS_RESERVADAS, TokenType
     from ProjetoMiniC.src.lexer.tokens import Token
 
 
 class Scanner:
-    SIMPLE_OPS: Dict[str, TokenType] = {
+    """Analisador léxico por autômato finito determinístico de leitura direta."""
+
+    # Mapeamento direto de pontuações de caractere único
+    OPERADORES_SIMPLES: Dict[str, TokenType] = {
         "+": TokenType.PLUS,
         "-": TokenType.MINUS,
         "*": TokenType.STAR,
@@ -64,258 +65,272 @@ class Scanner:
         ",": TokenType.COMMA,
     }
 
-    def __init__(self, source: str):
-        self.source: str = source
-        self.length: int = len(source)
-        self.pos: int = 0
-        self.line: int = 1
-        self.column: int = 1
+    def __init__(self, codigo_fonte: str):
+        self.codigo_fonte: str = codigo_fonte
+        self.tamanho: int = len(codigo_fonte)
+        self.posicao: int = 0
+        self.linha: int = 1
+        self.coluna: int = 1
         self.tokens: List[Token] = []
-        self.errors: List[LexicalError] = []
+        self.erros: List[ErroLexico] = []
 
-    def _at_end(self) -> bool:
-        return self.pos >= self.length
+    def _esta_no_fim(self) -> bool:
+        """Indica se toda a entrada do código-fonte já foi consumida."""
+        return self.posicao >= self.tamanho
 
-    def _peek(self, offset: int = 0) -> str:
-        idx = self.pos + offset
-        return self.source[idx] if idx < self.length else "\0"
+    def _espiar(self, deslocamento: int = 0) -> str:
+        """Retorna o caractere na posição atual (com deslocamento opcional) sem avançar o ponteiro."""
+        indice = self.posicao + deslocamento
+        return self.codigo_fonte[indice] if indice < self.tamanho else "\0"
 
-    def _advance(self) -> str:
-        ch = self.source[self.pos]
-        self.pos += 1
-        if ch == "\n":
-            self.line += 1
-            self.column = 1
+    def _avancar(self) -> str:
+        """Consome o caractere atual da entrada e atualiza os contadores de linha/coluna."""
+        caractere = self.codigo_fonte[self.posicao]
+        self.posicao += 1
+        if caractere == "\n":
+            self.linha += 1
+            self.coluna = 1
         else:
-            self.column += 1
-        return ch
+            self.coluna += 1
+        return caractere
 
-    def _match(self, expected: str) -> bool:
-        if self._peek() == expected:
-            self._advance()
+    def _compara_e_avanca(self, esperado: str) -> bool:
+        """Avança o ponteiro apenas se o próximo caractere corresponder ao caractere esperado."""
+        if self._espiar() == esperado:
+            self._avancar()
             return True
         return False
 
-    def _add_token(self, ttype: TokenType, lexeme: str, line: int, col: int,
-                    attribute: Optional[Union[int, float, str]] = None) -> None:
-        self.tokens.append(Token(ttype, lexeme, line, col, attribute))
+    def _adicionar_token(self, tipo: TokenType, lexema: str, linha: int, coluna: int,
+                           atributo: Optional[Union[int, float, str]] = None) -> None:
+        """Instancia e adiciona um token reconhecido na coleção principal."""
+        self.tokens.append(Token(tipo, lexema, linha, coluna, atributo))
 
     def scan_tokens(self) -> List[Token]:
-        while not self._at_end():
-            self._skip_whitespace()
-            if self._at_end():
+        """Varre iterativamente a fonte até o fim e anexa o token EOF final."""
+        while not self._esta_no_fim():
+            self._ignorar_espacos_em_branco()
+            if self._esta_no_fim():
                 break
-            self._scan_token()
-        self.tokens.append(Token(TokenType.EOF, "", self.line, self.column, None))
+            self._processar_proximo_token()
+        self.tokens.append(Token(TokenType.EOF, "", self.linha, self.coluna, None))
         return self.tokens
 
-    def analyze(self) -> AnalysisResult:
+    def analisar(self) -> ResultadoAnalise:
+        """Executa a análise e compila o relatório formal no objeto ResultadoAnalise."""
         self.scan_tokens()
-        return AnalysisResult(tokens=self.tokens, errors=self.errors)
+        return ResultadoAnalise(tokens=self.tokens, erros=self.erros)
 
-    def _skip_whitespace(self) -> None:
-        while not self._at_end() and self._peek() in " \t\r\n":
-            self._advance()
+    def _ignorar_espacos_em_branco(self) -> None:
+        """Ignora sequências de caracteres não-imprimíveis (espaços, tabulações, quebras)."""
+        while not self._esta_no_fim() and self._espiar() in " \t\r\n":
+            self._avancar()
 
-    def _scan_token(self) -> None:
-        start_line, start_col = self.line, self.column
-        ch = self._advance()
+    def _processar_proximo_token(self) -> None:
+        """Ponto central de decisão do autômato (identifica o tipo de elemento a partir do primeiro caractere)."""
+        linha_inicial, coluna_inicial = self.linha, self.coluna
+        caractere = self._avancar()
 
-        if ch.isalpha() or ch == "_":
-            self._identifier(start_line, start_col, ch)
-        elif ch.isdigit():
-            self._number(start_line, start_col, ch)
-        elif ch == '"':
-            self._string(start_line, start_col)
-        elif ch == "'":
-            self._char_literal(start_line, start_col)
-        elif ch == "/" and self._peek() == "/":
-            self._line_comment()
-        elif ch == "/" and self._peek() == "*":
-            self._block_comment(start_line, start_col)
+        if caractere.isalpha() or caractere == "_":
+            self._processar_identificador(linha_inicial, coluna_inicial, caractere)
+        elif caractere.isdigit():
+            self._processar_numero(linha_inicial, coluna_inicial, caractere)
+        elif caractere == '"':
+            self._processar_cadeia_caracteres(linha_inicial, coluna_inicial)
+        elif caractere == "'":
+            self._processar_literal_caractere(linha_inicial, coluna_inicial)
+        elif caractere == "/" and self._espiar() == "/":
+            self._processar_comentario_linha()
+        elif caractere == "/" and self._espiar() == "*":
+            self._processar_comentario_bloco(linha_inicial, coluna_inicial)
         else:
-            self._operator_or_error(ch, start_line, start_col)
+            self._processar_operador_ou_erro(caractere, linha_inicial, coluna_inicial)
 
-    def _identifier(self, line: int, col: int, first_char: str) -> None:
-        lexeme = first_char
-        while not self._at_end() and (self._peek().isalnum() or self._peek() == "_"):
-            lexeme += self._advance()
+    def _processar_identificador(self, linha: int, coluna: int, primeiro_caractere: str) -> None:
+        """Processa identificadores de variáveis/funções e verifica palavras reservadas."""
+        lexema = primeiro_caractere
+        while not self._esta_no_fim() and (self._espiar().isalnum() or self._espiar() == "_"):
+            lexema += self._avancar()
 
-        ttype = RESERVED_WORDS.get(lexeme, TokenType.ID)
-        attribute = lexeme if ttype is TokenType.ID else None
-        self._add_token(ttype, lexeme, line, col, attribute)
+        token_type = PALAVRAS_RESERVADAS.get(lexema, TokenType.ID)
+        atributo = lexema if token_type is TokenType.ID else None
+        self._adicionar_token(token_type, lexema, linha, coluna, atributo)
 
-    def _number(self, line: int, col: int, first_digit: str) -> None:
-        digits = first_digit
-        while not self._at_end() and self._peek().isdigit():
-            digits += self._advance()
+    def _processar_numero(self, linha: int, coluna: int, primeiro_digito: str) -> None:
+        """Processa literais numéricos inteiros, decimais (float) e trata erros de formatação."""
+        digitos = primeiro_digito
+        while not self._esta_no_fim() and self._espiar().isdigit():
+            digitos += self._avancar()
 
-        # Caso i06: Identificador iniciado por dígito
-        if not self._at_end() and (self._peek().isalpha() or self._peek() == "_"):
-            letters = ""
-            letters_col = self.column
-            while not self._at_end() and (self._peek().isalnum() or self._peek() == "_"):
-                letters += self._advance()
+        # Erro: Identificador iniciado incorretamente com números (ex: 12var)
+        if not self._esta_no_fim() and (self._espiar().isalpha() or self._espiar() == "_"):
+            letras = ""
+            coluna_letras = self.coluna
+            while not self._esta_no_fim() and (self._espiar().isalnum() or self._espiar() == "_"):
+                letras += self._avancar()
 
-            self.errors.append(InvalidIdentifierError(digits + letters, line, col))
-            self._add_token(TokenType.NUM_INT, digits, line, col, int(digits))
-            self._add_token(TokenType.ID, letters, line, letters_col, letters)
+            self.erros.append(ErroIdentificadorInvalido(digitos + letras, linha, coluna))
+            self._adicionar_token(TokenType.NUM_INT, digitos, linha, coluna, int(digitos))
+            self._adicionar_token(TokenType.ID, letras, linha, coluna_letras, letras)
             return
 
-        # Número real ou malformado (Caso i05)
-        if self._peek() == ".":
-            if not self._peek(1).isdigit():
-                dot_col = self.column
-                self._advance()
-                self.errors.append(MalformedRealLiteralError(digits + ".", line, col))
-                self._add_token(TokenType.NUM_INT, digits, line, col, int(digits))
-                self._add_token(TokenType.DOT, ".", line, dot_col, None)
+        # Análise de ponto flutuante ou erro de ponto flutuante incompleto (ex: 12.)
+        if self._espiar() == ".":
+            if not self._espiar(1).isdigit():
+                coluna_ponto = self.coluna
+                self._avancar()
+                self.erros.append(ErroLiteralRealMalformado(digitos + ".", linha, coluna))
+                self._adicionar_token(TokenType.NUM_INT, digitos, linha, coluna, int(digitos))
+                self._adicionar_token(TokenType.DOT, ".", linha, coluna_ponto, None)
                 return
 
-            lexeme = digits + self._advance()
-            while not self._at_end() and self._peek().isdigit():
-                lexeme += self._advance()
+            lexema = digitos + self._avancar()
+            while not self._esta_no_fim() and self._espiar().isdigit():
+                lexema += self._avancar()
 
-            self._add_token(TokenType.NUM_FLOAT, lexeme, line, col, float(lexeme))
+            self._adicionar_token(TokenType.NUM_FLOAT, lexema, linha, coluna, float(lexema))
             return
 
-        self._add_token(TokenType.NUM_INT, digits, line, col, int(digits))
+        self._adicionar_token(TokenType.NUM_INT, digitos, linha, coluna, int(digitos))
 
-    def _string(self, line: int, col: int) -> None:
-        # Caso i04: Cadeia não terminada
-        start_pos = self.pos - 1
-        content = ""
-        closed = False
+    def _processar_cadeia_caracteres(self, linha: int, coluna: int) -> None:
+        """Processa strings delimitadas por aspas duplas ("...")."""
+        posicao_inicial = self.posicao - 1
+        conteudo = ""
+        fechado = False
 
-        while not self._at_end():
-            if self._peek() == "\n":
+        while not self._esta_no_fim():
+            if self._espiar() == "\n":
                 break
-            if self._peek() == '"':
-                self._advance()
-                closed = True
+            if self._espiar() == '"':
+                self._avancar()
+                fechado = True
                 break
-            content += self._advance()
+            conteudo += self._avancar()
 
-        if closed:
-            lexeme = f'"{content}"'
-            self._add_token(TokenType.STRING, lexeme, line, col, content)
+        if fechado:
+            lexema = f'"{conteudo}"'
+            self._adicionar_token(TokenType.STRING, lexema, linha, coluna, conteudo)
         else:
-            err_lexeme = self.source[start_pos:self.pos]
-            self.errors.append(UnterminatedStringError(err_lexeme, line, col))
+            lexema_erro = self.codigo_fonte[posicao_inicial:self.posicao]
+            self.erros.append(ErroCadeiaNaoTerminada(lexema_erro, linha, coluna))
 
-            rewind = 0
-            while len(content) > 0 and content[-1] in (")", ";", "}", "]"):
-                content = content[:-1]
-                rewind += 1
+            recuo = 0
+            while len(conteudo) > 0 and conteudo[-1] in (")", ";", "}", "]"):
+                conteudo = conteudo[:-1]
+                recuo += 1
 
-            if rewind > 0:
-                self.pos -= rewind
-                self.column -= rewind
+            if recuo > 0:
+                self.posicao -= recuo
+                self.coluna -= recuo
 
-    def _char_literal(self, line: int, col: int) -> None:
-        # Caso i03: Caractere não terminado
-        if self._at_end() or self._peek() == "\n":
-            self.errors.append(UnterminatedCharError("'", line, col))
+    def _processar_literal_caractere(self, linha: int, coluna: int) -> None:
+        """Processa caracteres individuais entre aspas simples ('c')."""
+        if self._esta_no_fim() or self._espiar() == "\n":
+            self.erros.append(ErroCaractereNaoTerminado("'", linha, coluna))
             return
 
-        ch = self._advance()
-        if self._match("'"):
-            self._add_token(TokenType.CHAR_LITERAL, f"'{ch}'", line, col, ch)
+        caractere = self._avancar()
+        if self._compara_e_avanca("'"):
+            self._adicionar_token(TokenType.CHAR_LITERAL, f"'{caractere}'", linha, coluna, caractere)
         else:
-            lexeme = f"'{ch}"
-            self.errors.append(UnterminatedCharError(lexeme, line, col))
-            if self._peek() == ";":
-                self._advance()
+            lexema = f"'{caractere}"
+            self.erros.append(ErroCaractereNaoTerminado(lexema, linha, coluna))
+            if self._espiar() == ";":
+                self._avancar()
 
-    def _line_comment(self) -> None:
-        self._advance()
-        while not self._at_end() and self._peek() != "\n":
-            self._advance()
+    def _processar_comentario_linha(self) -> None:
+        """Descarta o restante da linha atual ao identificar comentários de linha (//)."""
+        self._avancar()
+        while not self._esta_no_fim() and self._espiar() != "\n":
+            self._avancar()
 
-    def _block_comment(self, line: int, col: int) -> None:
-        # Caso i02: Comentário de bloco não terminado
-        start_pos = self.pos - 1
-        self._advance()
+    def _processar_comentario_bloco(self, linha: int, coluna: int) -> None:
+        """Processa comentários de múltiplas linhas (/* ... */)."""
+        posicao_inicial = self.posicao - 1
+        self._avancar()
         while True:
-            if self._at_end():
-                lexeme = self.source[start_pos:]
-                self.errors.append(UnterminatedCommentError(line, col, lexeme))
+            if self._esta_no_fim():
+                lexema = self.codigo_fonte[posicao_inicial:]
+                self.erros.append(ErroComentarioNaoTerminado(linha, coluna, lexema))
                 return
-            if self._peek() == "*" and self._peek(1) == "/":
-                self._advance()
-                self._advance()
+            if self._espiar() == "*" and self._espiar(1) == "/":
+                self._avancar()
+                self._avancar()
                 return
-            self._advance()
+            self._avancar()
 
-    def _operator_or_error(self, ch: str, line: int, col: int) -> None:
-        if ch == "=":
-            if self._match("="):
-                self._add_token(TokenType.EQ, "==", line, col)
+    def _processar_operador_ou_erro(self, caractere: str, linha: int, coluna: int) -> None:
+        """Analisa operadores de um ou dois caracteres e aciona erro para símbolos desconhecidos."""
+        if caractere == "=":
+            if self._compara_e_avanca("="):
+                self._adicionar_token(TokenType.EQ, "==", linha, coluna)
             else:
-                self._add_token(TokenType.ASSIGN, "=", line, col)
-        elif ch == "!":
-            if self._match("="):
-                self._add_token(TokenType.NEQ, "!=", line, col)
+                self._adicionar_token(TokenType.ASSIGN, "=", linha, coluna)
+        elif caractere == "!":
+            if self._compara_e_avanca("="):
+                self._adicionar_token(TokenType.NEQ, "!=", linha, coluna)
             else:
-                self._add_token(TokenType.NOT, "!", line, col)
-        elif ch == "<":
-            if self._match("="):
-                self._add_token(TokenType.LE, "<=", line, col)
+                self._adicionar_token(TokenType.NOT, "!", linha, coluna)
+        elif caractere == "<":
+            if self._compara_e_avanca("="):
+                self._adicionar_token(TokenType.LE, "<=", linha, coluna)
             else:
-                self._add_token(TokenType.LT, "<", line, col)
-        elif ch == ">":
-            if self._match("="):
-                self._add_token(TokenType.GE, ">=", line, col)
+                self._adicionar_token(TokenType.LT, "<", linha, coluna)
+        elif caractere == ">":
+            if self._compara_e_avanca("="):
+                self._adicionar_token(TokenType.GE, ">=", linha, coluna)
             else:
-                self._add_token(TokenType.GT, ">", line, col)
-        elif ch == "&":
-            if self._match("&"):
-                self._add_token(TokenType.AND, "&&", line, col)
+                self._adicionar_token(TokenType.GT, ">", linha, coluna)
+        elif caractere == "&":
+            if self._compara_e_avanca("&"):
+                self._adicionar_token(TokenType.AND, "&&", linha, coluna)
             else:
-                self._invalid(ch, line, col)
-        elif ch == "|":
-            if self._match("|"):
-                self._add_token(TokenType.OR, "||", line, col)
+                self._sinalizar_invalido(caractere, linha, coluna)
+        elif caractere == "|":
+            if self._compara_e_avanca("|"):
+                self._adicionar_token(TokenType.OR, "||", linha, coluna)
             else:
-                self._invalid(ch, line, col)
-        elif ch == "/":
-            self._add_token(TokenType.SLASH, "/", line, col)
-        elif ch in self.SIMPLE_OPS:
-            self._add_token(self.SIMPLE_OPS[ch], ch, line, col)
+                self._sinalizar_invalido(caractere, linha, coluna)
+        elif caractere == "/":
+            self._adicionar_token(TokenType.SLASH, "/", linha, coluna)
+        elif caractere in self.OPERADORES_SIMPLES:
+            self._adicionar_token(self.OPERADORES_SIMPLES[caractere], caractere, linha, coluna)
         else:
-            self._invalid(ch, line, col)
+            self._sinalizar_invalido(caractere, linha, coluna)
 
-    def _invalid(self, ch: str, line: int, col: int) -> None:
-        self.errors.append(InvalidSymbolError(ch, line, col))
+    def _sinalizar_invalido(self, caractere: str, linha: int, coluna: int) -> None:
+        """Registra a presença de caracteres não reconhecidos."""
+        self.erros.append(ErroSimboloInvalido(caractere, linha, coluna))
 
-    def has_errors(self) -> bool:
-        return len(self.errors) > 0
+    def possui_erros(self) -> bool:
+        """Informa se foram registrados erros na execução do scanner."""
+        return len(self.erros) > 0
 
-    def print_tokens(self) -> None:
+    def imprimir_tokens(self) -> None:
+        """Exibe a lista dos tokens reconhecidos em formato de tabela no terminal."""
         cabecalho = f"{'TIPO':<14}{'LEXEMA':<26}{'LINHA':<7}{'COLUNA':<8}{'ATRIBUTO'}"
         print(cabecalho)
         print("-" * len(cabecalho))
-        for tok in self.tokens:
-            nome, lexema, linha, coluna, attr = tok.as_row()
+        for token in self.tokens:
+            nome, lexema, linha, coluna, atributo = token.para_linha_tabela()
             lexema_repr = repr(lexema)
             if len(lexema_repr) > 24:
                 lexema_repr = lexema_repr[:21] + "...'"
-            print(f"{nome:<14}{lexema_repr:<26}{linha:<7}{coluna:<8}{attr}")
+            print(f"{nome:<14}{lexema_repr:<26}{linha:<7}{coluna:<8}{atributo}")
 
-    def print_errors(self) -> None:
-        if not self.errors:
+    def imprimir_erros(self) -> None:
+        """Imprime os erros identificados de maneira legível."""
+        if not self.erros:
             print("Nenhum erro léxico encontrado.")
             return
-        print(f"{len(self.errors)} erro(s) léxico(s) encontrado(s):")
-        for err in self.errors:
-            print(f"  [ERRO LÉXICO] {err.diagnostic()}")
+        print(f"{len(self.erros)} erro(s) léxico(s) encontrado(s):")
+        for erro in self.erros:
+            print(f"  [ERRO LÉXICO] {erro.diagnostico()}")
 
-
-# ======================================================================
-# PONTO DE ENTRADA CLI: python scanner.py file.c
-# ======================================================================
 
 def main() -> int:
+    """Função de entrada do CLI ao rodar diretamente o módulo scanner.py."""
     caminho_alvo: str | None = None
     modo_apenas_jsonl = False
 
@@ -344,36 +359,34 @@ def main() -> int:
     scanner.scan_tokens()
 
     saida_tokens_json = serialize_tokens_jsonl(scanner.tokens)
-    saida_erros_json = serialize_errors_jsonl(scanner.errors) if scanner.errors else ""
+    saida_erros_json = serialize_errors_jsonl(scanner.erros) if scanner.erros else ""
 
-    # Se a flag --jsonl foi passada explicitamente, exibe estritamente o stream JSONL
     if modo_apenas_jsonl:
         if saida_tokens_json:
             print(saida_tokens_json)
         if saida_erros_json:
             print(saida_erros_json, file=sys.stderr)
-        return 2 if scanner.has_errors() else 0
+        return 2 if scanner.possui_erros() else 0
 
-    # Saída padrão completa: Tabela + Diagnóstico + JSONL de Tokens + JSONL de Erros
     print("=" * 80)
     print(f"Análise Léxica - Arquivo: {arquivo.name}")
     print("=" * 80)
     print("Tokens reconhecidos:")
-    scanner.print_tokens()
+    scanner.imprimir_tokens()
     print("-" * 80)
     print("Diagnóstico:")
-    scanner.print_errors()
+    scanner.imprimir_erros()
 
     print("-" * 80)
     print("Saída JSONL (Tokens):")
     print(saida_tokens_json if saida_tokens_json else "(vazio)")
 
-    if scanner.errors:
+    if scanner.erros:
         print("-" * 80)
         print("Saída JSONL (Erros):")
         print(saida_erros_json if saida_erros_json else "(vazio)")
 
-    return 2 if scanner.has_errors() else 0
+    return 2 if scanner.possui_erros() else 0
 
 
 if __name__ == "__main__":
