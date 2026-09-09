@@ -1,0 +1,2 @@
+# Especificação do miniC
+
