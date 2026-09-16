@@ -107,6 +107,15 @@ make parser
 make test-parser
 ```
 
+Para executar os 50 casos externos, informe a pasta `casos` do pacote de testes:
+
+```powershell
+python test_parser_50.py "C:\caminho\testes-parser-50\testes-parser-50\casos"
+```
+
+O runner valida a AST exata dos casos 01–25 e confirma a rejeição dos casos
+26–50. Ele retorna código `0` quando todos passam e `1` quando há falhas.
+
 Na interface principal (`python3 main.py`), o botão **Análise Sintática** abre
 uma tela própria para digitar ou carregar um arquivo, executar o parser e
 consultar a AST, os diagnósticos com linha/coluna e os tokens reconhecidos.
