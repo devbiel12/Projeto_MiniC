@@ -34,10 +34,12 @@ class VarDecl(Node):
     initializer: Optional[Node] = None
     size: Optional[Node] = None
     def to_sexpr(self) -> str:
-        name = self.name if self.size is None else self.name + "[" + self.size.to_sexpr() + "]"
-        values = [self.type_name + " " + name]
-        if self.initializer is not None: values.append(self.initializer.to_sexpr())
-        return "VarDecl(" + ",".join(values) + ")"
+        target = self.type_name + " " + self.name
+        if self.size is not None:
+            target += " size=" + self.size.to_sexpr()
+        if self.initializer is not None:
+            target += " = " + self.initializer.to_sexpr()
+        return "VarDecl(" + target + ")"
 
 
 @dataclass
@@ -67,8 +69,9 @@ class Id(Node):
 
 @dataclass
 class Lit(Node):
+    literal_type: str
     value: str
-    def to_sexpr(self) -> str: return "Lit(" + self.value + ")"
+    def to_sexpr(self) -> str: return "Lit(" + self.literal_type + "," + self.value + ")"
 
 
 @dataclass
@@ -120,7 +123,7 @@ class If(Node):
     else_branch: Optional[Node] = None
     def to_sexpr(self) -> str:
         parts = [self.condition.to_sexpr(), self.then_branch.to_sexpr()]
-        if self.else_branch is not None: parts.append(self.else_branch.to_sexpr())
+        parts.append(self.else_branch.to_sexpr() if self.else_branch is not None else "NULL")
         return "If(" + ",".join(parts) + ")"
 
 

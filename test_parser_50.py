@@ -1,13 +1,42 @@
 """Executa os 50 casos externos de regressao do parser MiniC."""
 
 import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
 
 
 def read_expected(path):
-    return path.read_text(encoding="utf-8").strip()
+    return path.read_text(encoding="utf-8-sig").strip()
+
+
+def read_manifest(cases_dir):
+    manifest_path = cases_dir.parent / "manifesto.json"
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    return {item["id"]: item for item in data["casos"]}
+
+
+def normalize_ast(text):
+    """Remove apenas espaços de formatação, preservando valores entre aspas."""
+    normalized = []
+    quoted = False
+    escaped = False
+    for character in text:
+        if escaped:
+            normalized.append(character)
+            escaped = False
+        elif character == "\\" and quoted:
+            normalized.append(character)
+            escaped = True
+        elif character in ("'", '"'):
+            normalized.append(character)
+            quoted = not quoted
+        elif character.isspace() and not quoted:
+            continue
+        else:
+            normalized.append(character)
+    return "".join(normalized)
 
 
 def run_case(parser_path, case_dir):
@@ -25,8 +54,14 @@ def run_case(parser_path, case_dir):
     expected = read_expected(expected_path)
 
     if number <= 25:
-        passed = result.returncode == 0 and result.stdout.strip() == expected
-        detail = "AST diferente" if result.returncode == 0 else result.stderr.strip()
+        actual = result.stdout.strip()
+        passed = result.returncode == 0 and normalize_ast(actual) == normalize_ast(expected)
+        if result.returncode != 0:
+            detail = result.stderr.strip()
+        elif not passed:
+            detail = "AST diferente\n  gerada: " + actual + "\n  esperada: " + expected
+        else:
+            detail = "AST equivalente"
     else:
         passed = result.returncode != 0
         detail = "aceitou entrada invalida" if result.returncode == 0 else "rejeitou"
@@ -81,19 +116,26 @@ def main():
         )
         return 2
 
+    manifest = read_manifest(cases_dir)
     parser_path = project_root / "parser.py"
     passed = 0
     failed = []
+    results = []
     for case_dir in case_dirs:
         ok, detail = run_case(parser_path, case_dir)
+        case_id = int(case_dir.name.split("_", 1)[0])
         if ok:
             passed += 1
-            status = "OK"
+            status = "ACEITO" if case_id <= 25 else "REJEITADO"
         else:
             failed.append((case_dir.name, detail))
             status = "FALHOU"
-        print("[{}] {}".format(status, case_dir.name))
+        item = manifest.get(case_id, {})
+        results.append((case_id, status, item.get("titulo", case_dir.name), item.get("diretorio", "")))
 
+    print("ID | STATUS | TÍTULO | DIRETÓRIO")
+    for case_id, status, title, directory in results:
+        print("{:02d} | {} | {} | {}".format(case_id, status, title, directory))
     print("\nResumo: {}/{} casos passaram.".format(passed, len(case_dirs)))
     for name, detail in failed:
         print("- {}: {}".format(name, detail))

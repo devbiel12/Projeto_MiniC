@@ -44,7 +44,7 @@ class Parser:
 
     def _top_level(self):
         if not self._check_any(TYPE_TOKENS + (TokenType.KW_VOID,)):
-            raise self._error(self._peek(), "uma declaração global ou função")
+            return [self._statement()]
         type_token = self._advance()
         if type_token.type is TokenType.KW_VOID:
             return [self._function_after_type(type_token)]
@@ -116,6 +116,30 @@ class Parser:
             self._consume(TokenType.RBRACKET, "']' após o tamanho do vetor")
         initializer = self._expression() if self._match(TokenType.ASSIGN) else None
         return VarDecl(type_name, name.lexeme, initializer, size)
+
+    def _primary(self):
+        if self._match(TokenType.ID): return Id(self._previous().lexeme)
+        if self._match(TokenType.NUM_INT):
+            token = self._previous()
+            return Lit("int", str(token.atributo if hasattr(token, 'atributo') else token.lexeme))
+        if self._match(TokenType.NUM_FLOAT):
+            token = self._previous()
+            return Lit("real", str(token.atributo if hasattr(token, 'atributo') else token.lexeme))
+        if self._match(TokenType.KW_TRUE): return Lit("bool", "true")
+        if self._match(TokenType.KW_FALSE): return Lit("bool", "false")
+        if self._match(TokenType.CHAR_LITERAL):
+            token = self._previous()
+            valor = token.atributo if hasattr(token, 'atributo') and token.atributo is not None else token.lexeme
+            return Lit("char", repr(valor) if not isinstance(valor, str) else valor)
+        if self._match(TokenType.STRING):
+            token = self._previous()
+            valor = token.atributo if hasattr(token, 'atributo') and token.atributo is not None else token.lexeme
+            return Lit("string", repr(valor) if not isinstance(valor, str) else valor)
+        if self._match(TokenType.LPAREN):
+            expression = self._expression()
+            self._consume(TokenType.RPAREN, "')' após expressão")
+            return expression
+        raise self._error(self._peek(), "expressão")
 
     def _statement(self):
         if self._match(TokenType.LBRACE):
@@ -223,15 +247,6 @@ class Parser:
                 expression = Call(expression, arguments)
             else: break
         return expression
-    def _primary(self):
-        if self._match(TokenType.ID): return Id(self._previous().lexeme)
-        if self._match(TokenType.NUM_INT, TokenType.NUM_FLOAT, TokenType.KW_TRUE, TokenType.KW_FALSE, TokenType.CHAR_LITERAL, TokenType.STRING): return Lit(self._previous().lexeme)
-        if self._match(TokenType.LPAREN):
-            expression = self._expression()
-            self._consume(TokenType.RPAREN, "')' após expressão")
-            return expression
-        raise self._error(self._peek(), "expressão")
-
     def _synchronize(self):
         # Sempre consome ao menos o token que provocou a falha. Sem esse
         # avanço, um token que também inicia um comando (por exemplo ``{``)
