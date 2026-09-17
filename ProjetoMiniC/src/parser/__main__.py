@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
+from ProjetoMiniC.src.ast.nodes import Node
+from ProjetoMiniC.src.ast.printer import print_tree
 from ProjetoMiniC.src.lexer.scanner import Scanner
 from ProjetoMiniC.src.parser.parser import Parser
 
@@ -38,6 +41,7 @@ class ResultadoSintatico:
     diagnosticos: list[str]
     tokens: list[str]
     codigo_saida: int
+    arvore: Node | None = None
 
     @property
     def sucesso(self) -> bool:
@@ -77,6 +81,7 @@ def analisar_fonte(fonte: str) -> ResultadoSintatico:
         diagnosticos=[],
         tokens=tokens,
         codigo_saida=0,
+        arvore=arvore,
     )
 
 
@@ -108,6 +113,9 @@ class ParserApp(tk.Tk):
         ttk.Button(barra, text="Analisar código", command=self.analisar).pack(side=tk.LEFT, padx=(0, 8))
         ttk.Button(barra, text="Abrir arquivo", command=self.abrir_arquivo).pack(side=tk.LEFT, padx=(0, 8))
         ttk.Button(barra, text="Copiar AST", command=self.copiar_ast).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(barra, text="Teste automático (50 casos)", command=self.executar_testes_automaticos).pack(
+            side=tk.LEFT, padx=(0, 8)
+        )
         ttk.Button(barra, text="Limpar", command=self.limpar).pack(side=tk.LEFT)
 
         self.status = ttk.Label(barra, text="Pronto para analisar.", foreground="#40536d")
@@ -123,6 +131,7 @@ class ParserApp(tk.Tk):
         self.abas = ttk.Notebook(container)
         self.abas.pack(fill=tk.BOTH, expand=True)
         self.saida_ast = self._adicionar_aba("AST")
+        self.saida_arvore = self._adicionar_aba("Árvore")
         self.saida_erros = self._adicionar_aba("Diagnósticos")
         self.saida_tokens = self._adicionar_aba("Tokens")
 
@@ -149,16 +158,26 @@ class ParserApp(tk.Tk):
         self._resultado = resultado
         self._preencher(self.saida_ast, resultado.ast or "AST não gerada devido aos erros.")
         self._preencher(
+            self.saida_arvore,
+            print_tree(resultado.arvore)
+            if resultado.arvore is not None
+            else "Árvore não gerada devido aos erros.",
+        )
+        if resultado.sucesso:
+            diagnostico = "ACEITO\nNenhum erro léxico ou sintático encontrado."
+        else:
+            diagnostico = "REJEITADO\n" + "\n".join(resultado.diagnosticos)
+        self._preencher(
             self.saida_erros,
-            "\n".join(resultado.diagnosticos) or "Nenhum erro léxico ou sintático encontrado.",
+            diagnostico,
         )
         self._preencher(self.saida_tokens, "\n".join(resultado.tokens))
         if resultado.sucesso:
-            self.status.configure(text="Análise concluída com sucesso.", foreground="#18733c")
+            self.status.configure(text="ACEITO - análise concluída com sucesso.", foreground="#18733c")
             self.abas.select(0)
         else:
             tipo = "léxico" if resultado.codigo_saida == 2 else "sintático"
-            self.status.configure(text="Análise concluída com erro {}.".format(tipo), foreground="#a12622")
+            self.status.configure(text="REJEITADO - erro {}.".format(tipo), foreground="#a12622")
             self.abas.select(1)
 
     def abrir_arquivo(self) -> None:
@@ -168,7 +187,7 @@ class ParserApp(tk.Tk):
         if not caminho:
             return
         try:
-            fonte = Path(caminho).read_text(encoding="utf-8")
+            fonte = Path(caminho).read_text(encoding="utf-8-sig")
         except OSError as erro:
             messagebox.showerror("Erro ao abrir arquivo", str(erro))
             return
@@ -186,10 +205,54 @@ class ParserApp(tk.Tk):
         self.update_idletasks()
         messagebox.showinfo("Copiado", "AST copiada para a área de transferência.")
 
+    def executar_testes_automaticos(self) -> None:
+        """Executa a suíte oficial e mostra o relatório em uma janela própria."""
+        projeto = Path(__file__).resolve().parents[3]
+        runner = projeto / "test_parser_50.py"
+        candidatos = [
+            projeto / "testes-parser-50" / "testes-parser-50" / "casos",
+            Path.home() / "Downloads" / "testes-parser-50" / "testes-parser-50" / "casos",
+        ]
+        casos = next((caminho for caminho in candidatos if caminho.is_dir()), None)
+        if not runner.is_file() or casos is None:
+            messagebox.showerror(
+                "Testes automáticos",
+                "Não foi possível localizar test_parser_50.py ou a pasta casos.",
+            )
+            return
+
+        try:
+            resultado = subprocess.run(
+                [sys.executable, str(runner), str(casos)],
+                cwd=str(projeto),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+        except OSError as erro:
+            messagebox.showerror("Testes automáticos", "Não foi possível executar os testes:\n" + str(erro))
+            return
+
+        janela = tk.Toplevel(self)
+        janela.title("Resultado do teste automático")
+        janela.geometry("1100x700")
+        janela.minsize(800, 450)
+
+        titulo = "ACEITO - 50 casos aprovados" if resultado.returncode == 0 else "REVISAR - existem casos com falha"
+        cor = "#18733c" if resultado.returncode == 0 else "#a12622"
+        ttk.Label(janela, text=titulo, foreground=cor, font=("Segoe UI", 13, "bold")).pack(
+            anchor="w", padx=12, pady=(12, 6)
+        )
+        saida = scrolledtext.ScrolledText(janela, wrap=tk.NONE, font=("Consolas", 10))
+        saida.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 12))
+        saida.insert("1.0", resultado.stdout or resultado.stderr or "Nenhuma saída foi produzida.")
+        saida.configure(state="disabled")
+
     def limpar(self) -> None:
         self.campo_fonte.delete("1.0", tk.END)
         self._resultado = None
-        for campo in (self.saida_ast, self.saida_erros, self.saida_tokens):
+        for campo in (self.saida_ast, self.saida_arvore, self.saida_erros, self.saida_tokens):
             self._preencher(campo, "")
         self.status.configure(text="Pronto para analisar.", foreground="#40536d")
 

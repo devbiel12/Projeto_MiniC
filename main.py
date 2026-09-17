@@ -118,10 +118,10 @@ def executar_terminal(argumentos: list[str]) -> int:
             for err in scanner.erros:
                 print(f"  [ERRO LÉXICO] {err.diagnostico()}", file=sys.stderr)
 
-        if parser.possui_erros():
-            print(f"{len(parser.erros)} erro(s) sintático(s) encontrado(s):", file=sys.stderr)
-            for err in parser.erros:
-                print(f"  [ERRO SINTÁTICO] {err.diagnostico()}", file=sys.stderr)
+        if parser.errors:
+            print(f"{len(parser.errors)} erro(s) sintático(s) encontrado(s):", file=sys.stderr)
+            for err in parser.errors:
+                print(f"  [ERRO SINTÁTICO] {err}", file=sys.stderr)
         elif apenas_parse and not mostrar_ast:
             print("Análise sintática concluída sem erros.")
 
@@ -133,7 +133,7 @@ def executar_terminal(argumentos: list[str]) -> int:
 
         if scanner.possui_erros():
             return 2
-        return 3 if parser.possui_erros() else 0
+        return 3 if parser.errors else 0
 
     # Formato JSONL (padrão dos fixtures do professor)
     if modo_jsonl:
