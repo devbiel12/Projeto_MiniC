@@ -72,24 +72,29 @@ class Scanner:
         self.linha: int = 1
         self.coluna: int = 1
         self.tokens: List[Token] = []
-        self.erros: List[ErroLexico] = []
+        self.errors: List[LexicalError] = []
 
-    def _esta_no_fim(self) -> bool:
-        """Indica se toda a entrada do código-fonte já foi consumida."""
-        return self.posicao >= self.tamanho
+    def _at_end(self) -> bool:
+        return self.pos >= self.length
 
-    def _espiar(self, deslocamento: int = 0) -> str:
-        """Retorna o caractere na posição atual (com deslocamento opcional) sem avançar o ponteiro."""
-        indice = self.posicao + deslocamento
-        return self.codigo_fonte[indice] if indice < self.tamanho else "\0"
+    @staticmethod
+    def _is_identifier_start(ch: str) -> bool:
+        return ch == "_" or (ch.isascii() and ch.isalpha())
 
-    def _avancar(self) -> str:
-        """Consome o caractere atual da entrada e atualiza os contadores de linha/coluna."""
-        caractere = self.codigo_fonte[self.posicao]
-        self.posicao += 1
-        if caractere == "\n":
-            self.linha += 1
-            self.coluna = 1
+    @staticmethod
+    def _is_identifier_continue(ch: str) -> bool:
+        return Scanner._is_identifier_start(ch) or (ch.isascii() and ch.isdigit())
+
+    def _peek(self, offset: int = 0) -> str:
+        idx = self.pos + offset
+        return self.source[idx] if idx < self.length else "\0"
+
+    def _advance(self) -> str:
+        ch = self.source[self.pos]
+        self.pos += 1
+        if ch == "\n":
+            self.line += 1
+            self.column = 1
         else:
             self.coluna += 1
         return caractere
@@ -119,85 +124,80 @@ class Scanner:
     def analisar(self) -> ResultadoAnalise:
         """Executa a análise e compila o relatório formal no objeto ResultadoAnalise."""
         self.scan_tokens()
-        return ResultadoAnalise(tokens=self.tokens, erros=self.erros)
+        return AnalysisResult(tokens=self.tokens, errors=self.errors)
 
-    def _ignorar_espacos_em_branco(self) -> None:
-        """Ignora sequências de caracteres não-imprimíveis (espaços, tabulações, quebras)."""
-        while not self._esta_no_fim() and self._espiar() in " \t\r\n":
-            self._avancar()
+    def _skip_whitespace(self) -> None:
+        while not self._at_end() and self._peek() in " \t\r\n":
+            self._advance()
 
-    def _processar_proximo_token(self) -> None:
-        """Ponto central de decisão do autômato (identifica o tipo de elemento a partir do primeiro caractere)."""
-        linha_inicial, coluna_inicial = self.linha, self.coluna
-        caractere = self._avancar()
+    def _scan_token(self) -> None:
+        start_line, start_col = self.line, self.column
+        ch = self._advance()
 
-        if caractere.isalpha() or caractere == "_":
-            self._processar_identificador(linha_inicial, coluna_inicial, caractere)
-        elif caractere.isdigit():
-            self._processar_numero(linha_inicial, coluna_inicial, caractere)
-        elif caractere == '"':
-            self._processar_cadeia_caracteres(linha_inicial, coluna_inicial)
-        elif caractere == "'":
-            self._processar_literal_caractere(linha_inicial, coluna_inicial)
-        elif caractere == "/" and self._espiar() == "/":
-            self._processar_comentario_linha()
-        elif caractere == "/" and self._espiar() == "*":
-            self._processar_comentario_bloco(linha_inicial, coluna_inicial)
+        if self._is_identifier_start(ch):
+            self._identifier(start_line, start_col, ch)
+        elif ch.isascii() and ch.isdigit():
+            self._number(start_line, start_col, ch)
+        elif ch == '"':
+            self._string(start_line, start_col)
+        elif ch == "'":
+            self._char_literal(start_line, start_col)
+        elif ch == "/" and self._peek() == "/":
+            self._line_comment()
+        elif ch == "/" and self._peek() == "*":
+            self._block_comment(start_line, start_col)
         else:
-            self._processar_operador_ou_erro(caractere, linha_inicial, coluna_inicial)
+            self._operator_or_error(ch, start_line, start_col)
 
-    def _processar_identificador(self, linha: int, coluna: int, primeiro_caractere: str) -> None:
-        """Processa identificadores de variáveis/funções e verifica palavras reservadas."""
-        lexema = primeiro_caractere
-        while not self._esta_no_fim() and (self._espiar().isalnum() or self._espiar() == "_"):
-            lexema += self._avancar()
+    def _identifier(self, line: int, col: int, first_char: str) -> None:
+        lexeme = first_char
+        while not self._at_end() and self._is_identifier_continue(self._peek()):
+            lexeme += self._advance()
 
-        token_type = PALAVRAS_RESERVADAS.get(lexema, TokenType.ID)
-        atributo = lexema if token_type is TokenType.ID else None
-        self._adicionar_token(token_type, lexema, linha, coluna, atributo)
+        ttype = RESERVED_WORDS.get(lexeme, TokenType.ID)
+        attribute = lexeme if ttype is TokenType.ID else None
+        self._add_token(ttype, lexeme, line, col, attribute)
 
-    def _processar_numero(self, linha: int, coluna: int, primeiro_digito: str) -> None:
-        """Processa literais numéricos inteiros, decimais (float) e trata erros de formatação."""
-        digitos = primeiro_digito
-        while not self._esta_no_fim() and self._espiar().isdigit():
-            digitos += self._avancar()
+    def _number(self, line: int, col: int, first_digit: str) -> None:
+        digits = first_digit
+        while not self._at_end() and self._peek().isascii() and self._peek().isdigit():
+            digits += self._advance()
 
-        # Erro: Identificador iniciado incorretamente com números (ex: 12var)
-        if not self._esta_no_fim() and (self._espiar().isalpha() or self._espiar() == "_"):
-            letras = ""
-            coluna_letras = self.coluna
-            while not self._esta_no_fim() and (self._espiar().isalnum() or self._espiar() == "_"):
-                letras += self._avancar()
+        # Caso i06: Identificador iniciado por dígito
+        if not self._at_end() and self._is_identifier_start(self._peek()):
+            letters = ""
+            letters_col = self.column
+            while not self._at_end() and self._is_identifier_continue(self._peek()):
+                letters += self._advance()
 
-            self.erros.append(ErroIdentificadorInvalido(digitos + letras, linha, coluna))
-            self._adicionar_token(TokenType.NUM_INT, digitos, linha, coluna, int(digitos))
-            self._adicionar_token(TokenType.ID, letras, linha, coluna_letras, letras)
+            self.errors.append(InvalidIdentifierError(digits + letters, line, col))
+            self._add_token(TokenType.NUM_INT, digits, line, col, int(digits))
+            self._add_token(TokenType.ID, letters, line, letters_col, letters)
             return
 
-        # Análise de ponto flutuante ou erro de ponto flutuante incompleto (ex: 12.)
-        if self._espiar() == ".":
-            if not self._espiar(1).isdigit():
-                coluna_ponto = self.coluna
-                self._avancar()
-                self.erros.append(ErroLiteralRealMalformado(digitos + ".", linha, coluna))
-                self._adicionar_token(TokenType.NUM_INT, digitos, linha, coluna, int(digitos))
-                self._adicionar_token(TokenType.DOT, ".", linha, coluna_ponto, None)
+        # Número real ou malformado (Caso i05)
+        if self._peek() == ".":
+            if not (self._peek(1).isascii() and self._peek(1).isdigit()):
+                dot_col = self.column
+                self._advance()
+                self.errors.append(MalformedRealLiteralError(digits + ".", line, col))
+                self._add_token(TokenType.NUM_INT, digits, line, col, int(digits))
+                self._add_token(TokenType.DOT, ".", line, dot_col, None)
                 return
 
-            lexema = digitos + self._avancar()
-            while not self._esta_no_fim() and self._espiar().isdigit():
-                lexema += self._avancar()
+            lexeme = digits + self._advance()
+            while not self._at_end() and self._peek().isascii() and self._peek().isdigit():
+                lexeme += self._advance()
 
             self._adicionar_token(TokenType.NUM_FLOAT, lexema, linha, coluna, float(lexema))
             return
 
         self._adicionar_token(TokenType.NUM_INT, digitos, linha, coluna, int(digitos))
 
-    def _processar_cadeia_caracteres(self, linha: int, coluna: int) -> None:
-        """Processa strings delimitadas por aspas duplas ("...")."""
-        posicao_inicial = self.posicao - 1
-        conteudo = ""
-        fechado = False
+    def _string(self, line: int, col: int) -> None:
+        start_pos = self.pos - 1
+        content = ""
+        closed = False
 
         while not self._esta_no_fim():
             if self._espiar() == "\n":
@@ -206,33 +206,47 @@ class Scanner:
                 self._avancar()
                 fechado = True
                 break
-            conteudo += self._avancar()
+            ch = self._advance()
+            if ch == "\\" and not self._at_end() and self._peek() != "\n":
+                escape = self._advance()
+                if escape in "nt\\\"'":
+                    content += {"n": "\n", "t": "\t"}.get(escape, escape)
+                    continue
+                content += "\\" + escape
+                continue
+            content += ch
 
-        if fechado:
-            lexema = f'"{conteudo}"'
-            self._adicionar_token(TokenType.STRING, lexema, linha, coluna, conteudo)
+        if closed:
+            lexeme = self.source[start_pos:self.pos]
+            self._add_token(TokenType.STRING, lexeme, line, col, content)
         else:
-            lexema_erro = self.codigo_fonte[posicao_inicial:self.posicao]
-            self.erros.append(ErroCadeiaNaoTerminada(lexema_erro, linha, coluna))
+            err_lexeme = self.source[start_pos:self.pos]
+            self.errors.append(UnterminatedStringError(err_lexeme, line, col))
 
-            recuo = 0
-            while len(conteudo) > 0 and conteudo[-1] in (")", ";", "}", "]"):
-                conteudo = conteudo[:-1]
-                recuo += 1
+            # Mantém delimitadores finais no fluxo para recuperação dos fixtures.
+            while self.pos > start_pos + 1 and self.source[self.pos - 1] in ") ;}]":
+                self.pos -= 1
+                self.column -= 1
 
-            if recuo > 0:
-                self.posicao -= recuo
-                self.coluna -= recuo
-
-    def _processar_literal_caractere(self, linha: int, coluna: int) -> None:
-        """Processa caracteres individuais entre aspas simples ('c')."""
-        if self._esta_no_fim() or self._espiar() == "\n":
-            self.erros.append(ErroCaractereNaoTerminado("'", linha, coluna))
+    def _char_literal(self, line: int, col: int) -> None:
+        if self._at_end() or self._peek() == "\n":
+            self.errors.append(UnterminatedCharError("'", line, col))
             return
 
-        caractere = self._avancar()
-        if self._compara_e_avanca("'"):
-            self._adicionar_token(TokenType.CHAR_LITERAL, f"'{caractere}'", linha, coluna, caractere)
+        ch = self._advance()
+        raw = ch
+        if ch == "\\":
+            if self._at_end() or self._peek() == "\n":
+                self.errors.append(UnterminatedCharError("'\\", line, col))
+                return
+            escape = self._advance()
+            if escape not in "nt\\\"'":
+                self.errors.append(UnterminatedCharError("'\\" + escape, line, col))
+                return
+            raw = "\\" + escape
+            ch = {"n": "\n", "t": "\t"}.get(escape, escape)
+        if self._match("'"):
+            self._add_token(TokenType.CHAR_LITERAL, f"'{raw}'", line, col, ch)
         else:
             lexema = f"'{caractere}"
             self.erros.append(ErroCaractereNaoTerminado(lexema, linha, coluna))
@@ -332,7 +346,7 @@ class Scanner:
 def main() -> int:
     """Função de entrada do CLI ao rodar diretamente o módulo scanner.py."""
     caminho_alvo: str | None = None
-    modo_apenas_jsonl = False
+    modo_apenas_jsonl = True
 
     for arg in sys.argv[1:]:
         if arg == "--jsonl":

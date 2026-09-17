@@ -124,6 +124,50 @@ Cada token reconhecido carrega tipo, lexema, atributo (quando aplicável), linha
 - `ProjetoMiniC/docs/gramatica.ebnf`: gramática da linguagem MiniC.
 - `ProjetoMiniC/docs/especificacao.md` e `docs/arquitetura.md`: ainda a serem preenchidos.
 
+## Análise sintática — Etapa 2
+
+O parser consome diretamente os `Token` produzidos pelo lexer e constrói uma
+AST tipada para declarações, funções, comandos e expressões. A saída de linha
+de comando é uma S-expression, por exemplo
+`Program(Function(int main() Block(Return(Lit(0)))))`.
+
+```bash
+# Python (somente biblioteca padrão)
+python3 parser.py codigo.c
+
+# C (compila o parser sem substituir o scanner da Etapa 1)
+make parser
+./parser codigo.c
+
+# Regressão do parser (executa as mesmas entradas em Python e C)
+make test-parser
+```
+
+Para executar os 50 casos externos, informe a pasta `casos` do pacote de testes:
+
+```powershell
+python test_parser_50.py "C:\caminho\testes-parser-50\testes-parser-50\casos"
+```
+
+O runner valida a AST exata dos casos 01–25 e confirma a rejeição dos casos
+26–50. Ele retorna código `0` quando todos passam e `1` quando há falhas.
+
+Na interface principal (`python3 main.py`), o botão **Análise Sintática** abre
+uma tela própria para digitar ou carregar um arquivo, executar o parser e
+consultar a AST, os diagnósticos com linha/coluna e os tokens reconhecidos.
+
+Os códigos de saída são: `0` para sucesso, `1` para uso/leitura inválidos,
+`2` para erro léxico e `3` para erro sintático. A versão C usa apenas a
+biblioteca padrão de C e a versão Python usa apenas a biblioteca padrão; o
+`tkinter` é usado somente pelas interfaces gráficas dos analisadores léxico e
+sintático.
+
+Os testes de regressão cobrem declarações globais e locais (inclusive listas
+separadas por vírgula), vetores, funções, parâmetros, controle de fluxo,
+entrada/saída, chamadas, indexação, precedência e associatividade. Além de
+aceitar ou rejeitar cada caso, eles verificam que as duas implementações
+produzem exatamente a mesma representação textual da AST.
+
 ## Tecnologias
 
 - Python 3 + Tkinter (interface gráfica)

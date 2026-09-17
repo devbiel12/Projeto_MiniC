@@ -1,21 +1,5 @@
-"""
-Pacote Parser - MiniC
-=====================
-Analisador sintático por descida recursiva. Consome os tokens produzidos
-pelo Scanner existente (src.lexer) e produz uma AST (src.ast).
+"""Analisador sintático descendente recursivo do MiniC."""
 
-Uso básico:
-    from src.lexer import Scanner
-    from src.parser import Parser
+from .parser import Parser, SyntaxErrorMiniC
 
-    tokens = Scanner(codigo_fonte).scan_tokens()
-    parser = Parser(tokens)
-    programa = parser.parse()
-"""
-
-from .errors import ErroSintatico
-from .parser import Parser
-
-__all__ = ["Parser", "ErroSintatico"]
-
-__version__ = "1.0.0"
+__all__ = ["Parser", "SyntaxErrorMiniC"]
