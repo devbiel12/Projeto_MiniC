@@ -1,1 +1,0 @@
-Program(VarDecl(int dados size=Lit(int,10)))

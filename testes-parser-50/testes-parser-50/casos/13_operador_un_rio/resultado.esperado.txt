@@ -1,2 +1,0 @@
-ACEITO
-AST produzida conforme ast.esperada.txt

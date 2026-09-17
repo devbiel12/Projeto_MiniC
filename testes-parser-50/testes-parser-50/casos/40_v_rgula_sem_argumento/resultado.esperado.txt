@@ -1,2 +1,0 @@
-REJEITADO
-Diagnóstico deve indicar erro sintático; pista: esperado FECHA_PAREN ou expressão

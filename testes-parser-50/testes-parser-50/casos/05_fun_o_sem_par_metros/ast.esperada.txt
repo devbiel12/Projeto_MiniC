@@ -1,1 +1,0 @@
-Program(Function(int main() Block(Return(Lit(int,0)))))

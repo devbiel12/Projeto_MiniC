@@ -1,262 +1,611 @@
-"""Parser descendente recursivo para os tokens produzidos pelo lexer MiniC."""
+"""
+parser.py
+=========
+Analisador sintático (Parser) da linguagem MiniC, implementado por
+DESCIDA RECURSIVA, seguindo a gramática EBNF definida em
+`especificacao-completa-minic.pdf` (seção 4) e a técnica descrita em
+`tutorial-conversao-tokens-ast-glc.pdf`.
+
+O parser NÃO reimplementa nem duplica o analisador léxico. Ele recebe a
+lista de `Token` já produzida pelo `Scanner` existente (ProjetoMiniC.src.lexer)
+e a converte em uma AST (ProjetoMiniC.src.ast).
+
+    tokens = Scanner(codigo_fonte).scan_tokens()
+    parser = Parser(tokens)
+    programa = parser.parse()
+    if parser.possui_erros():
+        for erro in parser.erros:
+            print(erro.diagnostico())
+
+Hierarquia de precedência implementada (da menor para a maior precedência,
+igual à seção 4.2/4.3 da especificação):
+
+    atribuicao        (=, associativo à direita)
+    expressao_or       (||)
+    expressao_and       (&&)
+    expressao_igualdade  (==, !=)
+    expressao_relacional  (<, >, <=, >=)
+    expressao_aditiva      (+, -)
+    expressao_multiplicativa (*, /, %)
+    expressao_unaria         (- unário, !)
+    expressao_posfixa          ([...], (...))
+    primario                     (literais, identificador, parênteses)
+
+Cada nível é uma função (parse_or, parse_and, ...), exatamente como
+recomendado no tutorial para eliminar recursão à esquerda e refletir a
+precedência diretamente na estrutura das chamadas.
+"""
 
 from __future__ import annotations
 
-from typing import List, Optional, Sequence
+from typing import List, Optional
 
-from ProjetoMiniC.src.ast import (
-    Assign, Binary, Block, Break, Call, Continue, ExprStmt, For, Function, Id,
-    If, Index, Lit, Parameter, Print, Program, Read, Return, Unary, VarDecl,
-    While,
+try:
+    from ..lexer.token_types import TokenType
+    from ..lexer.tokens import Token
+    from ..ast import nodes as no
+except (ImportError, ValueError):
+    from ProjetoMiniC.src.lexer.token_types import TokenType
+    from ProjetoMiniC.src.lexer.tokens import Token
+    from ProjetoMiniC.src.ast import nodes as no
+
+from .errors import ErroSintatico
+
+# ----------------------------------------------------------------------
+# Conjuntos de tokens usados para decisões da gramática
+# ----------------------------------------------------------------------
+
+# 'tipo' (seção 4 da EBNF): usado em declarações locais/globais e parâmetros.
+# Não inclui 'void' -- void só é permitido como tipo de retorno de função.
+TIPOS_VARIAVEL = (TokenType.KW_INT, TokenType.KW_FLOAT, TokenType.KW_BOOL, TokenType.KW_CHAR)
+
+# 'tipo_retorno' (seção 4 da EBNF): tipo | "void"
+TIPOS_RETORNO = TIPOS_VARIAVEL + (TokenType.KW_VOID,)
+
+# Tokens que iniciam um novo comando/declaração -- usados como pontos de
+# sincronização durante a recuperação de erros (modo pânico).
+INICIO_DECLARACAO_OU_COMANDO = (
+    TokenType.KW_INT, TokenType.KW_FLOAT, TokenType.KW_BOOL, TokenType.KW_CHAR, TokenType.KW_VOID,
+    TokenType.KW_IF, TokenType.KW_WHILE, TokenType.KW_FOR, TokenType.KW_RETURN,
+    TokenType.KW_BREAK, TokenType.KW_CONTINUE, TokenType.KW_PRINT, TokenType.KW_READ,
+    TokenType.LBRACE, TokenType.RBRACE,
 )
-from ProjetoMiniC.src.lexer.token_types import TokenType
-from ProjetoMiniC.src.lexer.tokens import Token
 
-
-TYPE_TOKENS = (TokenType.KW_INT, TokenType.KW_FLOAT, TokenType.KW_BOOL, TokenType.KW_CHAR)
-
-
-class SyntaxErrorMiniC(Exception):
-    """Diagnóstico sintático com a posição do token que provocou a falha."""
-
-    def __init__(self, token: Token, expected: str):
-        self.token = token
-        self.expected = expected
-        found = "EOF" if token.type is TokenType.EOF else repr(token.lexeme)
-        super().__init__("Erro sintático na linha {}, coluna {}: esperado {}; encontrado {}".format(token.line, token.column, expected, found))
+_OPERADORES_IGUALDADE = (TokenType.EQ, TokenType.NEQ)
+_OPERADORES_RELACIONAIS = (TokenType.LT, TokenType.LE, TokenType.GT, TokenType.GE)
+_OPERADORES_ADITIVOS = (TokenType.PLUS, TokenType.MINUS)
+_OPERADORES_MULTIPLICATIVOS = (TokenType.STAR, TokenType.SLASH, TokenType.PERCENT)
 
 
 class Parser:
-    def __init__(self, tokens: Sequence[Token]):
-        self.tokens = list(tokens)
-        self.current = 0
-        self.errors: List[SyntaxErrorMiniC] = []
+    """Analisador sintático por descida recursiva para a linguagem MiniC."""
 
-    def parse(self) -> Optional[Program]:
-        declarations = []
-        while not self._at_end():
-            try:
-                declarations.extend(self._top_level())
-            except SyntaxErrorMiniC as error:
-                self.errors.append(error)
-                self._synchronize()
-        return Program(declarations) if not self.errors else None
+    def __init__(self, tokens: List[Token]):
+        self.tokens: List[Token] = tokens
+        self.posicao: int = 0
+        self.erros: List[ErroSintatico] = []
 
-    def _top_level(self):
-        if not self._check_any(TYPE_TOKENS + (TokenType.KW_VOID,)):
-            raise self._error(self._peek(), "uma declaração global ou função")
-        type_token = self._advance()
-        if type_token.type is TokenType.KW_VOID:
-            return [self._function_after_type(type_token)]
-        name = self._consume(TokenType.ID, "identificador após o tipo")
-        if self._match(TokenType.LPAREN):
-            return [self._function_after_open(type_token, name)]
-        return self._global_after_name(type_token, name)
+    # ------------------------------------------------------------------
+    # Operações básicas de consumo de tokens (peek/advance/check/match/consume)
+    # ------------------------------------------------------------------
 
-    def _function_after_type(self, type_token: Token):
-        name = self._consume(TokenType.ID, "identificador após 'void'")
-        self._consume(TokenType.LPAREN, "'(' após o nome da função")
-        return self._function_after_open(type_token, name)
+    def _esta_no_fim(self) -> bool:
+        """is_at_end(): verdadeiro quando o token atual é EOF."""
+        return self._olhar().tipo is TokenType.EOF
 
-    def _function_after_open(self, type_token: Token, name: Token) -> Function:
-        parameters = self._parameters()
-        self._consume(TokenType.RPAREN, "')' após os parâmetros")
-        body = self._block()
-        return Function(type_token.lexeme, name.lexeme, parameters, body)
+    def _olhar(self) -> Token:
+        """peek(): consulta o token atual sem consumi-lo."""
+        return self.tokens[self.posicao]
 
-    def _parameters(self) -> List[Parameter]:
-        parameters = []
-        if self._check(TokenType.RPAREN): return parameters
-        while True:
-            type_token = self._consume_any(TYPE_TOKENS, "tipo do parâmetro")
-            name = self._consume(TokenType.ID, "identificador do parâmetro")
-            is_array = False
-            if self._match(TokenType.LBRACKET):
-                self._consume(TokenType.RBRACKET, "']' após '[' no parâmetro")
-                is_array = True
-            parameters.append(Parameter(type_token.lexeme, name.lexeme, is_array))
-            if not self._match(TokenType.COMMA): break
-            if self._check(TokenType.RPAREN): raise self._error(self._peek(), "parâmetro após ','")
-        return parameters
+    def _anterior(self) -> Token:
+        """Retorna o último token consumido."""
+        return self.tokens[self.posicao - 1]
 
-    def _global_after_name(self, type_token: Token, name: Token) -> List[VarDecl]:
-        declarations = [self._declarator(type_token.lexeme, name)]
-        while self._match(TokenType.COMMA):
-            declarations.append(self._declarator(
-                type_token.lexeme,
-                self._consume(TokenType.ID, "identificador após ','"),
-            ))
-        self._consume(TokenType.SEMI, "';' após declaração global")
-        return declarations
+    def _avancar(self) -> Token:
+        """advance(): consome o token atual e avança o cursor (se não estiver no fim)."""
+        if not self._esta_no_fim():
+            self.posicao += 1
+        return self._anterior()
 
-    def _block(self) -> Block:
-        self._consume(TokenType.LBRACE, "'{' para iniciar bloco")
-        items = []
-        while not self._check(TokenType.RBRACE) and not self._at_end():
-            try:
-                items.extend(self._local_declaration() if self._check_any(TYPE_TOKENS) else [self._statement()])
-            except SyntaxErrorMiniC as error:
-                self.errors.append(error)
-                self._synchronize()
-        self._consume(TokenType.RBRACE, "'}' para encerrar bloco")
-        return Block(items)
+    def _checar(self, tipo: TokenType) -> bool:
+        """check(): verifica o tipo do token atual sem consumi-lo."""
+        if self._esta_no_fim():
+            return False
+        return self._olhar().tipo is tipo
 
-    def _local_declaration(self) -> List[VarDecl]:
-        type_name = self._advance().lexeme
-        declarations = [self._declarator(type_name, self._consume(TokenType.ID, "identificador na declaração local"))]
-        while self._match(TokenType.COMMA):
-            declarations.append(self._declarator(type_name, self._consume(TokenType.ID, "identificador após ','")))
-        self._consume(TokenType.SEMI, "';' após declaração local")
-        return declarations
-
-    def _declarator(self, type_name: str, name: Token) -> VarDecl:
-        size = None
-        if self._match(TokenType.LBRACKET):
-            size = self._expression()
-            self._consume(TokenType.RBRACKET, "']' após o tamanho do vetor")
-        initializer = self._expression() if self._match(TokenType.ASSIGN) else None
-        return VarDecl(type_name, name.lexeme, initializer, size)
-
-    def _statement(self):
-        if self._match(TokenType.LBRACE):
-            self.current -= 1
-            return self._block()
-        if self._match(TokenType.KW_IF): return self._if_statement()
-        if self._match(TokenType.KW_WHILE): return self._while_statement()
-        if self._match(TokenType.KW_FOR): return self._for_statement()
-        if self._match(TokenType.KW_RETURN): return self._return_statement()
-        if self._match(TokenType.KW_BREAK):
-            self._consume(TokenType.SEMI, "';' após break")
-            return Break()
-        if self._match(TokenType.KW_CONTINUE):
-            self._consume(TokenType.SEMI, "';' após continue")
-            return Continue()
-        if self._match(TokenType.KW_PRINT): return self._print_statement()
-        if self._match(TokenType.KW_READ): return self._read_statement()
-        if self._match(TokenType.KW_ELSE): raise self._error(self._previous(), "'if' antes de 'else'")
-        expression = None if self._check(TokenType.SEMI) else self._expression()
-        self._consume(TokenType.SEMI, "';' após expressão")
-        return ExprStmt(expression)
-
-    def _if_statement(self):
-        self._consume(TokenType.LPAREN, "'(' após if")
-        condition = self._expression()
-        self._consume(TokenType.RPAREN, "')' após a condição")
-        then_branch = self._statement()
-        else_branch = self._statement() if self._match(TokenType.KW_ELSE) else None
-        return If(condition, then_branch, else_branch)
-
-    def _while_statement(self):
-        self._consume(TokenType.LPAREN, "'(' após while")
-        condition = self._expression()
-        self._consume(TokenType.RPAREN, "')' após a condição")
-        if self._check(TokenType.EOF): raise self._error(self._peek(), "corpo após while")
-        return While(condition, self._statement())
-
-    def _for_statement(self):
-        self._consume(TokenType.LPAREN, "'(' após for")
-        initializer = None if self._check(TokenType.SEMI) else self._expression()
-        self._consume(TokenType.SEMI, "';' após inicialização do for")
-        condition = None if self._check(TokenType.SEMI) else self._expression()
-        self._consume(TokenType.SEMI, "';' após condição do for")
-        increment = None if self._check(TokenType.RPAREN) else self._expression()
-        self._consume(TokenType.RPAREN, "')' após cláusulas do for")
-        return For(initializer, condition, increment, self._statement())
-
-    def _return_statement(self):
-        value = None if self._check(TokenType.SEMI) else self._expression()
-        self._consume(TokenType.SEMI, "';' após return")
-        return Return(value)
-
-    def _print_statement(self):
-        self._consume(TokenType.LPAREN, "'(' após print")
-        value = self._expression()
-        self._consume(TokenType.RPAREN, "')' após argumento de print")
-        self._consume(TokenType.SEMI, "';' após print")
-        return Print(value)
-
-    def _read_statement(self):
-        self._consume(TokenType.LPAREN, "'(' após read")
-        target = self._postfix()
-        if not isinstance(target, (Id, Index)): raise self._error(self._previous(), "localizável como argumento de read")
-        self._consume(TokenType.RPAREN, "')' após argumento de read")
-        self._consume(TokenType.SEMI, "';' após read")
-        return Read(target)
-
-    def _expression(self): return self._assignment()
-    def _assignment(self):
-        expression = self._or()
-        if self._match(TokenType.ASSIGN):
-            equals = self._previous()
-            value = self._assignment()
-            if not isinstance(expression, (Id, Index)): raise self._error(equals, "localizável antes de '='")
-            return Assign(expression, value)
-        return expression
-    def _or(self): return self._left(self._and, (TokenType.OR,))
-    def _and(self): return self._left(self._equality, (TokenType.AND,))
-    def _equality(self): return self._left(self._relational, (TokenType.EQ, TokenType.NEQ))
-    def _relational(self): return self._left(self._additive, (TokenType.LT, TokenType.LE, TokenType.GT, TokenType.GE))
-    def _additive(self): return self._left(self._multiplicative, (TokenType.PLUS, TokenType.MINUS))
-    def _multiplicative(self): return self._left(self._unary, (TokenType.STAR, TokenType.SLASH, TokenType.PERCENT))
-    def _left(self, next_rule, operators):
-        expression = next_rule()
-        while self._match(*operators):
-            operator = self._previous()
-            expression = Binary(operator.lexeme, expression, next_rule())
-        return expression
-    def _unary(self):
-        if self._match(TokenType.MINUS, TokenType.NOT): return Unary(self._previous().lexeme, self._unary())
-        return self._postfix()
-    def _postfix(self):
-        expression = self._primary()
-        while True:
-            if self._match(TokenType.LBRACKET):
-                index = self._expression()
-                self._consume(TokenType.RBRACKET, "']' após índice")
-                expression = Index(expression, index)
-            elif self._match(TokenType.LPAREN):
-                arguments = []
-                if not self._check(TokenType.RPAREN):
-                    arguments.append(self._expression())
-                    while self._match(TokenType.COMMA): arguments.append(self._expression())
-                self._consume(TokenType.RPAREN, "')' após argumentos")
-                expression = Call(expression, arguments)
-            else: break
-        return expression
-    def _primary(self):
-        if self._match(TokenType.ID): return Id(self._previous().lexeme)
-        if self._match(TokenType.NUM_INT, TokenType.NUM_FLOAT, TokenType.KW_TRUE, TokenType.KW_FALSE, TokenType.CHAR_LITERAL, TokenType.STRING): return Lit(self._previous().lexeme)
-        if self._match(TokenType.LPAREN):
-            expression = self._expression()
-            self._consume(TokenType.RPAREN, "')' após expressão")
-            return expression
-        raise self._error(self._peek(), "expressão")
-
-    def _synchronize(self):
-        # Sempre consome ao menos o token que provocou a falha. Sem esse
-        # avanço, um token que também inicia um comando (por exemplo ``{``)
-        # faria o modo pânico repetir o mesmo diagnóstico indefinidamente.
-        if not self._at_end():
-            self._advance()
-        while not self._at_end():
-            if self._previous().type in (TokenType.SEMI, TokenType.RBRACE): return
-            if self._peek().type in TYPE_TOKENS + (TokenType.KW_VOID, TokenType.KW_IF, TokenType.KW_WHILE, TokenType.KW_FOR, TokenType.KW_RETURN, TokenType.KW_BREAK, TokenType.KW_CONTINUE, TokenType.KW_PRINT, TokenType.KW_READ, TokenType.LBRACE): return
-            self._advance()
-    def _match(self, *types):
-        if self._check_any(types): self._advance(); return True
+    def _combinar(self, *tipos: TokenType) -> bool:
+        """match(): se o token atual for um dos tipos informados, consome e retorna True."""
+        for tipo in tipos:
+            if self._checar(tipo):
+                self._avancar()
+                return True
         return False
-    def _consume(self, token_type, expected):
-        if self._check(token_type): return self._advance()
-        raise self._error(self._peek(), expected)
-    def _consume_any(self, types, expected):
-        if self._check_any(types): return self._advance()
-        raise self._error(self._peek(), expected)
-    def _check(self, token_type): return not self._at_end() and self._peek().type is token_type
-    def _check_any(self, types): return any(self._check(token_type) for token_type in types)
-    def _advance(self):
-        if not self._at_end(): self.current += 1
-        return self._previous()
-    def _at_end(self): return self._peek().type is TokenType.EOF
-    def _peek(self): return self.tokens[self.current]
-    def _previous(self): return self.tokens[self.current - 1]
-    def _error(self, token, expected): return SyntaxErrorMiniC(token, expected)
+
+    def _consumir(self, tipo: TokenType, mensagem: str) -> Token:
+        """consume(): exige um token de um tipo específico; gera erro sintático caso contrário."""
+        if self._checar(tipo):
+            return self._avancar()
+        raise self._erro(self._olhar(), mensagem)
+
+    # ------------------------------------------------------------------
+    # Diagnóstico e recuperação de erros
+    # ------------------------------------------------------------------
+
+    def _descricao_token(self, token: Token) -> str:
+        """Formata o texto do token para uso nas mensagens de erro."""
+        if token.tipo is TokenType.EOF:
+            return "fim do arquivo"
+        return token.lexema
+
+    def _erro(self, token: Token, mensagem: str) -> ErroSintatico:
+        """error(): cria (mas não lança) um ErroSintatico e o registra na lista de erros."""
+        erro = ErroSintatico(
+            mensagem=mensagem,
+            linha=token.linha,
+            coluna=token.coluna,
+            encontrado=self._descricao_token(token),
+        )
+        self.erros.append(erro)
+        return erro
+
+    def _sincronizar(self) -> None:
+        """synchronize(): recuperação em modo pânico.
+
+        Descarta tokens até encontrar um ponto seguro para retomar a análise
+        (após um ';', ou antes de um token que claramente inicia um novo
+        comando/declaração), evitando tanto laço infinito quanto a perda
+        total do restante do programa após um único erro.
+        """
+        self._avancar()
+        while not self._esta_no_fim():
+            if self._anterior().tipo is TokenType.SEMI:
+                return
+            if self._olhar().tipo in INICIO_DECLARACAO_OU_COMANDO:
+                return
+            self._avancar()
+
+    def possui_erros(self) -> bool:
+        return len(self.erros) > 0
+
+    # ------------------------------------------------------------------
+    # Ponto de entrada
+    # ------------------------------------------------------------------
+
+    def parse(self) -> no.Program:
+        """programa ::= declaracao_global* declaracao_funcao* funcao_main
+
+        Na prática, declarações globais e funções podem aparecer intercaladas
+        na leitura (ambas começam com `tipo identificador`); a distinção é
+        feita observando se o identificador é seguido por '(' (função) ou não
+        (variável). A ordem de leitura é preservada na lista `declarations`.
+        """
+        primeiro_token = self._olhar()
+        declaracoes: List[no.NoAST] = []
+
+        while not self._esta_no_fim():
+            try:
+                item = self._declaracao_topo()
+                if isinstance(item, list):
+                    declaracoes.extend(item)
+                else:
+                    declaracoes.append(item)
+            except ErroSintatico:
+                self._sincronizar()
+
+        return no.Program(linha=primeiro_token.linha, coluna=primeiro_token.coluna,
+                           declarations=declaracoes)
+
+    # ------------------------------------------------------------------
+    # Declarações de nível superior (globais e funções)
+    # ------------------------------------------------------------------
+
+    def _declaracao_topo(self):
+        """Decide, a partir do tipo e do que vem depois do identificador, se a
+        declaração é uma função (`FunctionDecl`) ou uma lista de variáveis
+        globais (`List[VarDecl]`)."""
+        if self._checar(TokenType.KW_VOID):
+            tipo_token = self._avancar()
+            nome_token = self._consumir(TokenType.ID, "esperado identificador após 'void'")
+            if not self._checar(TokenType.LPAREN):
+                raise self._erro(self._olhar(),
+                                  "'void' só é permitido como tipo de retorno de função")
+            return self._declaracao_funcao(tipo_token, nome_token)
+
+        if not self._olhar().tipo in TIPOS_VARIAVEL:
+            token = self._olhar()
+            raise self._erro(token, "esperado tipo ('int', 'float', 'bool' ou 'char')")
+
+        tipo_token = self._avancar()
+        nome_token = self._consumir(TokenType.ID, "esperado identificador após o tipo")
+
+        if self._checar(TokenType.LPAREN):
+            return self._declaracao_funcao(tipo_token, nome_token)
+
+        return self._lista_declaracao_variavel(tipo_token, nome_token)
+
+    def _declaracao_funcao(self, tipo_token: Token, nome_token: Token) -> no.FunctionDecl:
+        """declaracao_funcao ::= tipo_retorno identificador "(" parametros? ")" bloco"""
+        self._consumir(TokenType.LPAREN, "esperado '(' após o nome da função")
+        parametros: List[no.Param] = []
+        if not self._checar(TokenType.RPAREN):
+            parametros.append(self._parametro())
+            while self._combinar(TokenType.COMMA):
+                parametros.append(self._parametro())
+        self._consumir(TokenType.RPAREN, "esperado ')' após a lista de parâmetros")
+
+        corpo = self._bloco()
+        return no.FunctionDecl(
+            linha=tipo_token.linha, coluna=tipo_token.coluna,
+            tipo_retorno=tipo_token.lexema, nome=nome_token.lexema,
+            parametros=parametros, corpo=corpo,
+        )
+
+    def _parametro(self) -> no.Param:
+        """parametro ::= tipo identificador | tipo identificador "[" "]" """
+        if self._olhar().tipo not in TIPOS_VARIAVEL:
+            raise self._erro(self._olhar(), "esperado tipo de parâmetro")
+        tipo_token = self._avancar()
+        nome_token = self._consumir(TokenType.ID, "esperado identificador do parâmetro")
+        eh_vetor = False
+        if self._combinar(TokenType.LBRACKET):
+            self._consumir(TokenType.RBRACKET, "esperado ']' após '[' no parâmetro vetor")
+            eh_vetor = True
+        return no.Param(linha=nome_token.linha, coluna=nome_token.coluna,
+                         tipo=tipo_token.lexema, nome=nome_token.lexema, eh_vetor=eh_vetor)
+
+    def _lista_declaracao_variavel(self, tipo_token: Token, primeiro_nome: Token) -> List[no.VarDecl]:
+        """declaracao_local/global ::= tipo declarador ("," declarador)* ";"
+        declarador ::= identificador inicializacao? | identificador "[" tamanho "]"
+        """
+        declaracoes: List[no.VarDecl] = [self._declarador(tipo_token, primeiro_nome)]
+        while self._combinar(TokenType.COMMA):
+            nome_token = self._consumir(TokenType.ID, "esperado identificador após ','")
+            declaracoes.append(self._declarador(tipo_token, nome_token))
+        self._consumir(TokenType.SEMI, "esperado ';' ao final da declaração de variável")
+        return declaracoes
+
+    def _declarador(self, tipo_token: Token, nome_token: Token) -> no.VarDecl:
+        if self._combinar(TokenType.LBRACKET):
+            tamanho = self._expressao()
+            self._consumir(TokenType.RBRACKET, "esperado ']' após o tamanho do vetor")
+            return no.VarDecl(linha=nome_token.linha, coluna=nome_token.coluna,
+                               tipo=tipo_token.lexema, nome=nome_token.lexema,
+                               inicializador=None, tamanho_vetor=tamanho, eh_vetor=True)
+
+        inicializador = None
+        if self._combinar(TokenType.ASSIGN):
+            inicializador = self._expressao()
+        return no.VarDecl(linha=nome_token.linha, coluna=nome_token.coluna,
+                           tipo=tipo_token.lexema, nome=nome_token.lexema,
+                           inicializador=inicializador, tamanho_vetor=None, eh_vetor=False)
+
+    # ------------------------------------------------------------------
+    # Blocos e comandos
+    # ------------------------------------------------------------------
+
+    def _bloco(self) -> no.Block:
+        """bloco ::= "{" item_bloco* "}" """
+        abre = self._consumir(TokenType.LBRACE, "esperado '{' para iniciar o bloco")
+        comandos: List[no.NoAST] = []
+        while not self._checar(TokenType.RBRACE) and not self._esta_no_fim():
+            try:
+                item = self._item_bloco()
+                if isinstance(item, list):
+                    comandos.extend(item)
+                else:
+                    comandos.append(item)
+            except ErroSintatico:
+                self._sincronizar()
+        self._consumir(TokenType.RBRACE, "esperado '}' para fechar o bloco")
+        return no.Block(linha=abre.linha, coluna=abre.coluna, comandos=comandos)
+
+    def _item_bloco(self):
+        """item_bloco ::= declaracao_local | comando"""
+        if self._olhar().tipo in TIPOS_VARIAVEL:
+            tipo_token = self._avancar()
+            nome_token = self._consumir(TokenType.ID, "esperado identificador após o tipo")
+            return self._lista_declaracao_variavel(tipo_token, nome_token)
+        return self._comando()
+
+    def _comando(self) -> no.NoAST:
+        """comando ::= comando_bloco | comando_if | comando_while | comando_for
+        | comando_return | comando_break | comando_continue
+        | comando_print | comando_read | comando_expressao
+        """
+        if self._checar(TokenType.LBRACE):
+            return self._bloco()
+        if self._checar(TokenType.KW_IF):
+            return self._comando_if()
+        if self._checar(TokenType.KW_WHILE):
+            return self._comando_while()
+        if self._checar(TokenType.KW_FOR):
+            return self._comando_for()
+        if self._checar(TokenType.KW_RETURN):
+            return self._comando_return()
+        if self._checar(TokenType.KW_BREAK):
+            return self._comando_break()
+        if self._checar(TokenType.KW_CONTINUE):
+            return self._comando_continue()
+        if self._checar(TokenType.KW_PRINT):
+            return self._comando_print()
+        if self._checar(TokenType.KW_READ):
+            return self._comando_read()
+        return self._comando_expressao()
+
+    def _comando_if(self) -> no.IfStmt:
+        """comando_if ::= "if" "(" expressao ")" comando ("else" comando)?"""
+        palavra = self._avancar()
+        self._consumir(TokenType.LPAREN, "esperado '(' após 'if'")
+        condicao = self._expressao()
+        self._consumir(TokenType.RPAREN, "esperado ')' após a condição do 'if'")
+        entao = self._comando()
+        senao = None
+        if self._combinar(TokenType.KW_ELSE):
+            senao = self._comando()
+        return no.IfStmt(linha=palavra.linha, coluna=palavra.coluna,
+                          condicao=condicao, entao=entao, senao=senao)
+
+    def _comando_while(self) -> no.WhileStmt:
+        """comando_while ::= "while" "(" expressao ")" comando"""
+        palavra = self._avancar()
+        self._consumir(TokenType.LPAREN, "esperado '(' após 'while'")
+        condicao = self._expressao()
+        self._consumir(TokenType.RPAREN, "esperado ')' após a condição do 'while'")
+        corpo = self._comando()
+        return no.WhileStmt(linha=palavra.linha, coluna=palavra.coluna,
+                             condicao=condicao, corpo=corpo)
+
+    def _comando_for(self) -> no.ForStmt:
+        """comando_for ::= "for" "(" expressao? ";" expressao? ";" expressao? ")" comando"""
+        palavra = self._avancar()
+        self._consumir(TokenType.LPAREN, "esperado '(' após 'for'")
+
+        inicializacao = None
+        if not self._checar(TokenType.SEMI):
+            inicializacao = self._expressao()
+        self._consumir(TokenType.SEMI, "esperado ';' após a inicialização do 'for'")
+
+        condicao = None
+        if not self._checar(TokenType.SEMI):
+            condicao = self._expressao()
+        self._consumir(TokenType.SEMI, "esperado ';' após a condição do 'for'")
+
+        incremento = None
+        if not self._checar(TokenType.RPAREN):
+            incremento = self._expressao()
+        self._consumir(TokenType.RPAREN, "esperado ')' após o cabeçalho do 'for'")
+
+        corpo = self._comando()
+        return no.ForStmt(linha=palavra.linha, coluna=palavra.coluna,
+                           inicializacao=inicializacao, condicao=condicao,
+                           incremento=incremento, corpo=corpo)
+
+    def _comando_return(self) -> no.ReturnStmt:
+        """comando_return ::= "return" expressao? ";" """
+        palavra = self._avancar()
+        valor = None
+        if not self._checar(TokenType.SEMI):
+            valor = self._expressao()
+        self._consumir(TokenType.SEMI, "esperado ';' após 'return'")
+        return no.ReturnStmt(linha=palavra.linha, coluna=palavra.coluna, valor=valor)
+
+    def _comando_break(self) -> no.BreakStmt:
+        palavra = self._avancar()
+        self._consumir(TokenType.SEMI, "esperado ';' após 'break'")
+        return no.BreakStmt(linha=palavra.linha, coluna=palavra.coluna)
+
+    def _comando_continue(self) -> no.ContinueStmt:
+        palavra = self._avancar()
+        self._consumir(TokenType.SEMI, "esperado ';' após 'continue'")
+        return no.ContinueStmt(linha=palavra.linha, coluna=palavra.coluna)
+
+    def _comando_print(self) -> no.PrintStmt:
+        """comando_print ::= "print" "(" argumento_print ")" ";" """
+        palavra = self._avancar()
+        self._consumir(TokenType.LPAREN, "esperado '(' após 'print'")
+        valor = self._expressao()
+        self._consumir(TokenType.RPAREN, "esperado ')' após o argumento de 'print'")
+        self._consumir(TokenType.SEMI, "esperado ';' após 'print(...)'")
+        return no.PrintStmt(linha=palavra.linha, coluna=palavra.coluna, valor=valor)
+
+    def _comando_read(self) -> no.ReadStmt:
+        """comando_read ::= "read" "(" localizavel ")" ";" """
+        palavra = self._avancar()
+        self._consumir(TokenType.LPAREN, "esperado '(' após 'read'")
+        alvo = self._localizavel()
+        self._consumir(TokenType.RPAREN, "esperado ')' após o argumento de 'read'")
+        self._consumir(TokenType.SEMI, "esperado ';' após 'read(...)'")
+        return no.ReadStmt(linha=palavra.linha, coluna=palavra.coluna, alvo=alvo)
+
+    def _comando_expressao(self) -> no.ExprStmt:
+        """comando_expressao ::= expressao? ";" """
+        if self._checar(TokenType.SEMI):
+            ponto_virgula = self._avancar()
+            return no.ExprStmt(linha=ponto_virgula.linha, coluna=ponto_virgula.coluna, expressao=None)
+        inicio = self._olhar()
+        expressao = self._expressao()
+        self._consumir(TokenType.SEMI, "esperado ';' ao final do comando")
+        return no.ExprStmt(linha=inicio.linha, coluna=inicio.coluna, expressao=expressao)
+
+    def _localizavel(self) -> no.NoAST:
+        """Um 'localizavel' é um identificador, opcionalmente seguido de um ou
+        mais acessos a vetor (ex.: `x`, `valores[i]`). Usado em `read(...)` e
+        como alvo de atribuição."""
+        nome_token = self._consumir(TokenType.ID, "esperado identificador")
+        expr: no.NoAST = no.Identifier(linha=nome_token.linha, coluna=nome_token.coluna,
+                                        nome=nome_token.lexema)
+        while self._combinar(TokenType.LBRACKET):
+            colchete = self._anterior()
+            indice = self._expressao()
+            self._consumir(TokenType.RBRACKET, "esperado ']' após o índice do vetor")
+            expr = no.ArrayAccess(linha=colchete.linha, coluna=colchete.coluna,
+                                   vetor=expr, indice=indice)
+        return expr
+
+    # ------------------------------------------------------------------
+    # Expressões (em ordem de precedência crescente)
+    # ------------------------------------------------------------------
+
+    def _expressao(self) -> no.NoAST:
+        """expressao ::= atribuicao"""
+        return self._atribuicao()
+
+    def _atribuicao(self) -> no.NoAST:
+        """atribuicao ::= localizavel "=" atribuicao | expressao_or
+
+        Estratégia clássica de descida recursiva para atribuição
+        associativa à direita: analisa-se primeiro o lado esquerdo como uma
+        expressão comum (nível OR); se um '=' for encontrado em seguida,
+        valida-se que o que foi lido é um alvo atribuível (Identifier ou
+        ArrayAccess) e a atribuição é montada recursivamente.
+        """
+        expr = self._expressao_or()
+
+        if self._checar(TokenType.ASSIGN):
+            igual = self._avancar()
+            valor = self._atribuicao()
+            if isinstance(expr, (no.Identifier, no.ArrayAccess)):
+                return no.Assignment(linha=igual.linha, coluna=igual.coluna,
+                                      alvo=expr, valor=valor)
+            raise self._erro(igual, "alvo de atribuição inválido (esperado identificador ou vetor)")
+
+        return expr
+
+    def _expressao_or(self) -> no.NoAST:
+        """expressao_or ::= expressao_and ("||" expressao_and)*"""
+        esquerda = self._expressao_and()
+        while self._checar(TokenType.OR):
+            op = self._avancar()
+            direita = self._expressao_and()
+            esquerda = no.BinaryOp(linha=op.linha, coluna=op.coluna,
+                                    operador="||", esquerda=esquerda, direita=direita)
+        return esquerda
+
+    def _expressao_and(self) -> no.NoAST:
+        """expressao_and ::= expressao_igualdade ("&&" expressao_igualdade)*"""
+        esquerda = self._expressao_igualdade()
+        while self._checar(TokenType.AND):
+            op = self._avancar()
+            direita = self._expressao_igualdade()
+            esquerda = no.BinaryOp(linha=op.linha, coluna=op.coluna,
+                                    operador="&&", esquerda=esquerda, direita=direita)
+        return esquerda
+
+    def _expressao_igualdade(self) -> no.NoAST:
+        """expressao_igualdade ::= expressao_relacional (("=="|"!=") expressao_relacional)*"""
+        esquerda = self._expressao_relacional()
+        while self._checar(TokenType.EQ) or self._checar(TokenType.NEQ):
+            op = self._avancar()
+            direita = self._expressao_relacional()
+            esquerda = no.BinaryOp(linha=op.linha, coluna=op.coluna,
+                                    operador=op.lexema, esquerda=esquerda, direita=direita)
+        return esquerda
+
+    def _expressao_relacional(self) -> no.NoAST:
+        """expressao_relacional ::= expressao_aditiva (op_rel expressao_aditiva)*"""
+        esquerda = self._expressao_aditiva()
+        while self._olhar().tipo in _OPERADORES_RELACIONAIS:
+            op = self._avancar()
+            direita = self._expressao_aditiva()
+            esquerda = no.BinaryOp(linha=op.linha, coluna=op.coluna,
+                                    operador=op.lexema, esquerda=esquerda, direita=direita)
+        return esquerda
+
+    def _expressao_aditiva(self) -> no.NoAST:
+        """expressao_aditiva ::= expressao_multiplicativa (("+"|"-") expressao_multiplicativa)*"""
+        esquerda = self._expressao_multiplicativa()
+        while self._olhar().tipo in _OPERADORES_ADITIVOS:
+            op = self._avancar()
+            direita = self._expressao_multiplicativa()
+            esquerda = no.BinaryOp(linha=op.linha, coluna=op.coluna,
+                                    operador=op.lexema, esquerda=esquerda, direita=direita)
+        return esquerda
+
+    def _expressao_multiplicativa(self) -> no.NoAST:
+        """expressao_multiplicativa ::= expressao_unaria (("*"|"/"|"%") expressao_unaria)*"""
+        esquerda = self._expressao_unaria()
+        while self._olhar().tipo in _OPERADORES_MULTIPLICATIVOS:
+            op = self._avancar()
+            direita = self._expressao_unaria()
+            esquerda = no.BinaryOp(linha=op.linha, coluna=op.coluna,
+                                    operador=op.lexema, esquerda=esquerda, direita=direita)
+        return esquerda
+
+    def _expressao_unaria(self) -> no.NoAST:
+        """expressao_unaria ::= ("-" | "!") expressao_unaria | expressao_posfixa
+
+        Recursiva à direita: permite encadear unários (ex.: `!!a`, `--a`
+        sintaticamente, mesmo que semanticamente incomuns) e diferencia
+        claramente o menos unário (`-x`) do menos binário (`a - x`), pois
+        só entra nesta regra quando o '-' aparece em posição de operando.
+        """
+        if self._checar(TokenType.MINUS) or self._checar(TokenType.NOT):
+            op = self._avancar()
+            operando = self._expressao_unaria()
+            return no.UnaryOp(linha=op.linha, coluna=op.coluna,
+                               operador=op.lexema, operando=operando)
+        return self._expressao_posfixa()
+
+    def _expressao_posfixa(self) -> no.NoAST:
+        """expressao_posfixa ::= primario ( "[" expressao "]" | "(" argumentos? ")" )*"""
+        expr = self._primario()
+        while True:
+            if self._combinar(TokenType.LBRACKET):
+                colchete = self._anterior()
+                indice = self._expressao()
+                self._consumir(TokenType.RBRACKET, "esperado ']' após o índice do vetor")
+                expr = no.ArrayAccess(linha=colchete.linha, coluna=colchete.coluna,
+                                       vetor=expr, indice=indice)
+            elif self._combinar(TokenType.LPAREN):
+                parenteses = self._anterior()
+                if not isinstance(expr, no.Identifier):
+                    raise self._erro(parenteses, "chamada inválida: apenas identificadores podem ser chamados")
+                argumentos: List[no.NoAST] = []
+                if not self._checar(TokenType.RPAREN):
+                    argumentos.append(self._expressao())
+                    while self._combinar(TokenType.COMMA):
+                        argumentos.append(self._expressao())
+                self._consumir(TokenType.RPAREN, "esperado ')' após os argumentos da chamada")
+                expr = no.CallExpr(linha=parenteses.linha, coluna=parenteses.coluna,
+                                    nome_funcao=expr.nome, argumentos=argumentos)
+            else:
+                break
+        return expr
+
+    def _primario(self) -> no.NoAST:
+        """primario ::= identificador | literal_inteiro | literal_real
+        | literal_booleano | literal_caractere | "(" expressao ")"
+
+        Extensão pragmática: também aceita literal_cadeia (STRING), já que o
+        lexer produz esse token (usado tipicamente em `print("mensagem")`)
+        embora a tabela de tipos da especificação não preveja um tipo
+        'string' de primeira classe -- ver PROBLEMA ENCONTRADO no relatório.
+        """
+        token = self._olhar()
+
+        if self._combinar(TokenType.NUM_INT):
+            return no.Literal(linha=token.linha, coluna=token.coluna,
+                               valor=token.atributo, tipo_literal="int")
+        if self._combinar(TokenType.NUM_FLOAT):
+            return no.Literal(linha=token.linha, coluna=token.coluna,
+                               valor=token.atributo, tipo_literal="float")
+        if self._combinar(TokenType.KW_TRUE):
+            return no.Literal(linha=token.linha, coluna=token.coluna,
+                               valor=True, tipo_literal="bool")
+        if self._combinar(TokenType.KW_FALSE):
+            return no.Literal(linha=token.linha, coluna=token.coluna,
+                               valor=False, tipo_literal="bool")
+        if self._combinar(TokenType.CHAR_LITERAL):
+            return no.Literal(linha=token.linha, coluna=token.coluna,
+                               valor=token.atributo, tipo_literal="char")
+        if self._combinar(TokenType.STRING):
+            return no.Literal(linha=token.linha, coluna=token.coluna,
+                               valor=token.atributo, tipo_literal="string")
+        if self._combinar(TokenType.ID):
+            return no.Identifier(linha=token.linha, coluna=token.coluna, nome=token.lexema)
+        if self._combinar(TokenType.LPAREN):
+            expr = self._expressao()
+            self._consumir(TokenType.RPAREN, "esperado ')' após a expressão entre parênteses")
+            return expr
+
+        raise self._erro(token, "era esperado identificador, literal, '(' ou expressão unária")

@@ -1,1 +1,0 @@
-Program(VarDecl(int x=Unary(-,Lit(int,5))), VarDecl(bool b=Unary(!,Lit(bool,false))))

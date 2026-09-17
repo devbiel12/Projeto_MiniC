@@ -1,1 +1,0 @@
-Program(Function(int main() Block(ExprStmt(Call(Id(foo))), Return(Lit(int,0)))))

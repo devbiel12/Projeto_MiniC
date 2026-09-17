@@ -1,1 +1,0 @@
-void espera() { return; }

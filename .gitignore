@@ -1,9 +1,0 @@
-__pycache__/
-*.py[cod]
-*.o
-/parser
-/scanner
-/C/minic_scanner
-*.out.jsonl
-*.err.jsonl
-
