@@ -264,60 +264,103 @@ Os scripts de teste usam diretorios temporarios para o executavel C e os removem
 - JSONL para a troca de tokens e diagnosticos do lexer.
 ## Executando a versão em Python
 
-Requer Python 3.10+ (o projeto usa `from __future__ import annotations`) e Tkinter instalado para a interface gráfica.
+Todos os comandos abaixo devem ser executados **a partir da raiz do repositório**.
 
-A partir da raiz do repositório:
+### Interface gráfica
 
 ```bash
 python main.py
 ```
 
-- Sem argumentos: abre o painel gráfico (Tkinter), com atalhos para cada etapa do compilador (as etapas ainda não implementadas exibem um aviso).
-- Com um arquivo como argumento: roda a análise léxica em modo terminal.
+Abre o painel principal, com um botão para cada etapa do compilador. **Análise Léxica** e **Análise Sintática** abrem interfaces próprias; as demais etapas ainda exibem um aviso de "em desenvolvimento".
+
+### Linha de comando
 
 ```bash
-python main.py caminho/para/arquivo.minic
-python main.py caminho/para/arquivo.minic --tokens   # imprime só a tabela de tokens
-python main.py caminho/para/arquivo.minic --errors   # imprime só os erros léxicos
-python main.py caminho/para/arquivo.minic --jsonl    # imprime tokens/erros em JSONL
+python main.py arquivo.minic                # análise léxica (tokens + diagnóstico)
+python main.py arquivo.minic --tokens       # só a tabela de tokens
+python main.py arquivo.minic --errors       # só os erros léxicos
+python main.py arquivo.minic --jsonl        # tokens em JSONL (erros em JSONL no stderr)
+python main.py arquivo.minic --parse        # roda o parser e informa se há erros sintáticos
+python main.py arquivo.minic --ast          # imprime a AST em árvore
+python main.py arquivo.minic --ast --sexp   # imprime a AST em S-expression
 ```
 
-Alternativamente, é possível rodar o pacote do lexer diretamente, a partir da pasta `ProjetoMiniC`:
+Atalhos por etapa:
 
 ```bash
-cd ProjetoMiniC
-python -m src.lexer                                   # abre a interface gráfica do lexer
-python -m src.lexer ../ProjetoMiniC/casos-invalidos/i01_simbolo_desconhecido.minic --jsonl
+python scanner.py arquivo.minic --jsonl     # apenas o lexer (aceita caminho relativo a ProjetoMiniC/)
+python parser.py arquivo.c                  # apenas o parser; imprime a AST em S-expression
 ```
 
-### Interface gráfica do lexer
+Exemplo de saída em S-expression:
 
-A interface em Tkinter (`AplicacaoLexer`, em `src/lexer/__main__.py`) permite:
+```text
+Program(Function(int main() Block(Return(Lit(int,0)))))
+```
 
-1. executar os testes embutidos do lexer (`demo.py`);
-2. colar um trecho de código diretamente na interface e analisá-lo;
-3. abrir um arquivo `.minic`, `.mc`, `.c` ou `.txt` e analisá-lo;
-4. visualizar a saída formatada, os tokens em JSONL e os erros em JSONL em abas separadas, além de copiar o JSONL de tokens para a área de transferência.
+Os módulos também podem ser executados como pacote (também a partir da raiz):
+
+```bash
+python -m ProjetoMiniC.src.lexer            # interface gráfica do lexer
+python -m ProjetoMiniC.src.lexer arquivo.minic --jsonl
+python -m ProjetoMiniC.src.parser           # interface gráfica do parser
+```
+
+### Códigos de saída
+
+| Código | Significado |
+|---|---|
+| `0` | Sucesso |
+| `1` | Uso incorreto ou arquivo não encontrado/ilegível |
+| `2` | Erro léxico |
+| `3` | Erro sintático |
+
+### Interfaces gráficas
+
+- **Lexer** (`src/lexer/__main__.py`): executa os testes embutidos, analisa código colado ou aberto de arquivo (`.minic`, `.mc`, `.c`, `.txt`) e mostra a saída formatada, os tokens em JSONL e os erros em JSONL em abas separadas, com opção de copiar o JSONL.
+- **Parser** (`src/parser/__main__.py`): permite digitar ou carregar um arquivo, executar o parser e consultar a AST, os diagnósticos com linha/coluna e os tokens reconhecidos.
 
 ## Executando a versão em C
 
-A versão em C implementa o mesmo analisador léxico. O `Makefile`, na raiz do repositório, foi escrito para ser executado com o diretório de trabalho dentro de `C/`:
+O `Makefile` usa caminhos relativos à **raiz** do repositório. Não é mais necessário entrar em `C/`.
 
 ```bash
-cd C
-make -f ../Makefile          # compila o binário minic_scanner
-./minic_scanner arquivo.c              # saída legível (tabela de tokens + diagnóstico)
-./minic_scanner arquivo.c --jsonl      # saída apenas em JSONL (tokens no stdout, erros no stderr)
+make                                  # compila o scanner em C/minic_scanner
+./C/minic_scanner arquivo.c           # saída legível (tabela de tokens + diagnóstico)
+./C/minic_scanner arquivo.c --jsonl   # tokens em JSONL no stdout, erros no stderr
+
+make parser                           # compila o parser em ./parser
+./parser arquivo.c                    # imprime a AST em S-expression
 ```
 
-Alvos adicionais do Makefile (executados também a partir de `C/`):
+Também é possível compilar o scanner em um único passo, sem o Makefile:
 
 ```bash
-make -f ../Makefile test-valid    # roda o scanner sobre os programas em casos-programas-c/
-make -f ../Makefile test-invalid  # roda o scanner sobre os casos em casos-invalidos/
-make -f ../Makefile test          # roda os dois conjuntos de teste
-make -f ../Makefile clean         # remove binários e arquivos de saída gerados
+gcc -std=c11 scanner.c -o scanner
+./scanner arquivo.c
 ```
+
+O parser em C usa os mesmos códigos de saída da tabela acima (`0`, `1`, `2` e `3`). No Windows, o `Makefile` já trata a extensão `.exe` e o comando de remoção.
+
+Para remover binários e arquivos gerados: `make clean`.
+
+## Testes
+
+| Comando (na raiz) | O que faz |
+|---|---|
+| `make test` | Roda o scanner em C sobre `casos-programas-c/` e `casos-invalidos/` e grava as saídas em `*.out.jsonl` / `*.err.jsonl` (não compara com o esperado). Também há `make test-valid` e `make test-invalid`. |
+| `bash test_scanner_python.sh scanner.py ProjetoMiniC/casos-programas-c` | Compara os tokens do scanner Python com os `.expected.jsonl`. |
+| `bash test_scanner_c.sh scanner.c ProjetoMiniC/casos-programas-c` | Compila `scanner.c` e compara os tokens do scanner C com os `.expected.jsonl`. |
+| `python test_parser_50.py testes-parser-50/testes-parser-50/casos` | Roda os 50 casos do parser (Python). |
+| `make test-parser-50 CASES_DIR=testes-parser-50/testes-parser-50/casos` | Mesmo que o anterior, via Makefile. |
+| `make test-parser` | Compila o parser em C e roda `tests/test_parser.py` (requer Tkinter). |
+
+Observações:
+
+- Os scripts `test_scanner_*.sh` recebem `[scanner] [pasta-de-testes]` e geram um `output.jsonl` temporário na pasta atual.
+- **50 casos do parser:** os casos 01–25 devem ser aceitos com a AST esperada e os casos 26–50 devem ser rejeitados. O runner retorna `0` quando todos passam, `1` quando há falhas e `2` se a pasta de casos não for encontrada. Sem argumento, ele procura em `~/Downloads/testes-parser-50/...` e em `../testes-parser-50/...`, por isso informe o caminho como nos exemplos acima.
+- **Parser em C:** rejeita os 25 casos inválidos, mas só 3 dos 25 casos válidos batem com a AST esperada, porque a saída em C ainda usa o formato antigo (por exemplo `VarDecl(int x,Lit(42))` em vez do formato do Python). Por isso, `make test-parser`, que compara a saída de Python e C, ainda falha até o formato ser alinhado.
 
 ## O que o lexer reconhece
 
@@ -326,62 +369,31 @@ make -f ../Makefile clean         # remove binários e arquivos de saída gerado
 - comentários de linha e de bloco;
 - erros léxicos, como símbolos desconhecidos, comentários não terminados, strings/caracteres não terminados, números reais malformados e identificadores iniciados por dígito.
 
-Cada token reconhecido carrega tipo, lexema, atributo (quando aplicável), linha e coluna. A saída pode ser formatada em tabela ou serializada em JSONL, seguindo o mesmo formato entre as versões Python e C.
+Cada token reconhecido carrega tipo, lexema, atributo (quando aplicável), linha e coluna. A saída pode ser formatada em tabela ou serializada em JSONL, seguindo o mesmo formato nas versões Python e C.
+
+## Análise sintática e AST
+
+O parser consome os `Token` produzidos pelo lexer e constrói uma AST para declarações (globais e locais, inclusive listas separadas por vírgula e vetores), funções e parâmetros, comandos de controle de fluxo, entrada/saída, chamadas, indexação e expressões (com precedência e associatividade). Os nós usados na saída são: `Program`, `Function`, `Block`, `VarDecl`, `If`, `While`, `Return`, `ExprStmt`, `Assign`, `Binary`, `Unary`, `Call`, `Index`, `Id` e `Lit`.
+
+A AST pode ser exibida de duas formas:
+
+- **S-expression** (`parser.py`, `main.py --ast --sexp`): uma linha, no formato usado pelos casos de teste.
+- **Árvore indentada** (`main.py --ast`): mais legível para leitura no terminal.
+
+Erros léxicos e sintáticos são reportados com linha e coluna.
 
 ## Casos de teste
 
 - `ProjetoMiniC/casos-programas-c/`: programas `.c` válidos (Fibonacci, números primos, média de vetor, menu interativo, controle de temperatura), cada um com o `.expected.jsonl` correspondente.
 - `ProjetoMiniC/casos-invalidos/`: trechos `.minic` com erros léxicos propositais, cada um com `.expected.jsonl` (tokens esperados) e `.errors.jsonl` (erros esperados).
+- `testes-parser-50/testes-parser-50/casos/`: 50 programas do professor para o parser. Cada pasta tem `codigo.c`, `ast.esperada.txt` e `resultado.esperado.txt`. O `manifesto.json` lista título e diretório de cada caso.
 
 ## Documentação
 
-- `ProjetoMiniC/docs/README.md`: detalhes específicos da implementação em Python.
+- `ProjetoMiniC/docs/README.md`: notas sobre a implementação do lexer em Python.
 - `ProjetoMiniC/docs/gramatica.ebnf`: gramática da linguagem MiniC.
-- `ProjetoMiniC/docs/especificacao.md` e `docs/arquitetura.md`: ainda a serem preenchidos.
-
-## Análise sintática — Etapa 2
-
-O parser consome diretamente os `Token` produzidos pelo lexer e constrói uma
-AST tipada para declarações, funções, comandos e expressões. A saída de linha
-de comando é uma S-expression, por exemplo
-`Program(Function(int main() Block(Return(Lit(0)))))`.
-
-```bash
-# Python (somente biblioteca padrão)
-python3 parser.py codigo.c
-
-# C (compila o parser sem substituir o scanner da Etapa 1)
-make parser
-./parser codigo.c
-
-# Regressão do parser (executa as mesmas entradas em Python e C)
-make test-parser
-```
-
-Para executar os 50 casos externos, informe a pasta `casos` do pacote de testes:
-
-```powershell
-python test_parser_50.py "C:\caminho\testes-parser-50\testes-parser-50\casos"
-```
-
-O runner valida a AST exata dos casos 01–25 e confirma a rejeição dos casos
-26–50. Ele retorna código `0` quando todos passam e `1` quando há falhas.
-
-Na interface principal (`python3 main.py`), o botão **Análise Sintática** abre
-uma tela própria para digitar ou carregar um arquivo, executar o parser e
-consultar a AST, os diagnósticos com linha/coluna e os tokens reconhecidos.
-
-Os códigos de saída são: `0` para sucesso, `1` para uso/leitura inválidos,
-`2` para erro léxico e `3` para erro sintático. A versão C usa apenas a
-biblioteca padrão de C e a versão Python usa apenas a biblioteca padrão; o
-`tkinter` é usado somente pelas interfaces gráficas dos analisadores léxico e
-sintático.
-
-Os testes de regressão cobrem declarações globais e locais (inclusive listas
-separadas por vírgula), vetores, funções, parâmetros, controle de fluxo,
-entrada/saída, chamadas, indexação, precedência e associatividade. Além de
-aceitar ou rejeitar cada caso, eles verificam que as duas implementações
-produzem exatamente a mesma representação textual da AST.
+- `ProjetoMiniC/docs/especificacao.md` e `ProjetoMiniC/docs/arquitetura.md`: ainda a serem preenchidos.
+- `testes-parser-50/testes-parser-50/README.md`: descrição do pacote de 50 casos.
 
 ## Tecnologias
 
