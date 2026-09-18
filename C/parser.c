@@ -38,6 +38,21 @@ static AstNode *expression(Parser *p);
 static AstNode *statement(Parser *p);
 static AstNode *block(Parser *p);
 static AstNode *null_node(void) { return ast_new(AST_NULL, ""); }
+static AstNode *literal_node(Token *token) {
+    const char *type = "string";
+    if (token->type == NUM_INT) type = "int";
+    else if (token->type == NUM_FLOAT) type = "real";
+    else if (token->type == KW_TRUE || token->type == KW_FALSE) type = "bool";
+    else if (token->type == CHAR_LITERAL) type = "char";
+    DynStr text;
+    dynstr_init(&text);
+    dynstr_push_str(&text, type);
+    dynstr_push_char(&text, ',');
+    dynstr_push_str(&text, token->lexeme);
+    AstNode *node = ast_new(AST_LIT, text.data);
+    dynstr_free(&text);
+    return node;
+}
 static AstNode *left(Parser *p, AstNode *(*next)(Parser *), const TokenType *ops, size_t n) {
     AstNode *node = next(p);
     while (node) {
@@ -52,7 +67,7 @@ static AstNode *left(Parser *p, AstNode *(*next)(Parser *), const TokenType *ops
 static AstNode *primary(Parser *p) {
     Token *t = peek(p);
     if (match(p, ID)) return ast_new(AST_ID, t->lexeme);
-    if (match(p, NUM_INT) || match(p, NUM_FLOAT) || match(p, KW_TRUE) || match(p, KW_FALSE) || match(p, CHAR_LITERAL) || match(p, STRING)) return ast_new(AST_LIT, t->lexeme);
+    if (match(p, NUM_INT) || match(p, NUM_FLOAT) || match(p, KW_TRUE) || match(p, KW_FALSE) || match(p, CHAR_LITERAL) || match(p, STRING)) return literal_node(t);
     if (match(p, LPAREN)) { AstNode *node = expression(p); if (!consume(p, RPAREN, "')' após expressão")) { ast_free(node); return NULL; } return node; }
     error_at(p, t, "expressão"); return NULL;
 }
@@ -105,7 +120,7 @@ static AstNode *local_declaration(Parser *p) {
     if (!consume(p, SEMI, "';' após declaração local")) { ast_free(container); return NULL; }
     return container;
 }
-static AstNode *if_statement(Parser *p) { if (!consume(p, LPAREN, "'(' após if")) return NULL; AstNode *cond = expression(p); if (!cond || !consume(p, RPAREN, "')' após condição")) { ast_free(cond); return NULL; } AstNode *then_node = statement(p); if (!then_node) { ast_free(cond); return NULL; } AstNode *node = ast_new(AST_IF, ""); ast_add(node, cond); ast_add(node, then_node); if (match(p, KW_ELSE)) { AstNode *other = statement(p); if (!other) { ast_free(node); return NULL; } ast_add(node, other); } return node; }
+static AstNode *if_statement(Parser *p) { if (!consume(p, LPAREN, "'(' após if")) return NULL; AstNode *cond = expression(p); if (!cond || !consume(p, RPAREN, "')' após condição")) { ast_free(cond); return NULL; } AstNode *then_node = statement(p); if (!then_node) { ast_free(cond); return NULL; } AstNode *node = ast_new(AST_IF, ""); ast_add(node, cond); ast_add(node, then_node); AstNode *other = null_node(); if (match(p, KW_ELSE)) { ast_free(other); other = statement(p); if (!other) { ast_free(node); return NULL; } } ast_add(node, other); return node; }
 static AstNode *while_statement(Parser *p) { if (!consume(p, LPAREN, "'(' após while")) return NULL; AstNode *cond = expression(p); if (!cond || !consume(p, RPAREN, "')' após condição")) { ast_free(cond); return NULL; } AstNode *body = statement(p); if (!body) { ast_free(cond); return NULL; } AstNode *node = ast_new(AST_WHILE, ""); ast_add(node, cond); ast_add(node, body); return node; }
 static AstNode *for_statement(Parser *p) { if (!consume(p, LPAREN, "'(' após for")) return NULL; AstNode *a = check(p, SEMI) ? null_node() : expression(p); if (!a || !consume(p, SEMI, "';' após inicialização do for")) { ast_free(a); return NULL; } AstNode *b = check(p, SEMI) ? null_node() : expression(p); if (!b || !consume(p, SEMI, "';' após condição do for")) { ast_free(a); ast_free(b); return NULL; } AstNode *c = check(p, RPAREN) ? null_node() : expression(p); if (!c || !consume(p, RPAREN, "')' após cláusulas do for")) { ast_free(a); ast_free(b); ast_free(c); return NULL; } AstNode *body = statement(p); if (!body) { ast_free(a); ast_free(b); ast_free(c); return NULL; } AstNode *node=ast_new(AST_FOR,""); ast_add(node,a);ast_add(node,b);ast_add(node,c);ast_add(node,body);return node; }
 static AstNode *statement(Parser *p) {
@@ -147,8 +162,9 @@ AstNode *parser_parse(Parser *p) {
     while (!at_end(p)) {
         Token *type = peek(p);
         if (!is_type(type->type) && type->type != KW_VOID) {
-            error_at(p, type, "declaração global ou função");
-            synchronize(p);
+            AstNode *top_level_statement = statement(p);
+            if (top_level_statement) ast_add(root, top_level_statement);
+            else synchronize(p);
             continue;
         }
         advance_p(p);

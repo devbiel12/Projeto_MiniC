@@ -29,8 +29,8 @@ static void append_node(DynStr *out, const AstNode *node) {
     dynstr_push_str(out, name(node->kind)); dynstr_push_char(out, '(');
     if (node->kind == AST_VAR) {
         dynstr_push_str(out, node->text);
-        if (node->count && node->children[0]) { dynstr_push_char(out, '['); append_node(out, node->children[0]); dynstr_push_char(out, ']'); }
-        if (node->count > 1 && node->children[1]) { dynstr_push_char(out, ','); append_node(out, node->children[1]); }
+        if (node->count && node->children[0]) { dynstr_push_str(out, " size="); append_node(out, node->children[0]); }
+        if (node->count > 1 && node->children[1]) { dynstr_push_str(out, " = "); append_node(out, node->children[1]); }
     } else if (node->kind == AST_FUNCTION) {
         dynstr_push_str(out, node->text);
         if (node->count) {
