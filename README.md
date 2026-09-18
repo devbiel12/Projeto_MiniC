@@ -1,173 +1,27 @@
 # Projeto MiniC
 
-Compilador educacional para a linguagem **MiniC**, um subconjunto de C. O projeto possui implementacoes equivalentes em Python e C para o analisador lexico e o analisador sintatico.
+Compilador educacional para a linguagem **MiniC**, um subconjunto de C. O projeto possui implementacoes equivalentes em Python e C para o analisador lexico e o analisador sintatico, uma interface grafica em Tkinter, ferramentas de linha de comando e suites de testes para as duas implementacoes.
+
+O objetivo do projeto e construir gradualmente um pipeline de compilacao: leitura do codigo-fonte, analise lexica, analise sintatica, construcao da AST, analise semantica, geracao de representacao intermediaria, otimizacao e geracao de codigo.
 
 ## Estado atual
 
 | Etapa | Python | C |
 |---|---|---|
 | Analise lexica | Implementada | Implementada |
-| Analise sintatica | Implementada | Implementada |
-| AST | Implementada para o parser | Implementada para o parser |
-| Analise semantica | Estrutura reservada | Ainda nao implementada |
-| IR, otimizacao e geracao de codigo | Estrutura reservada | Ainda nao implementadas |
 
-O parser Python e o parser C consomem arquivos MiniC/C, geram a mesma representacao textual da AST e usam os mesmos codigos de saida.
+O scanner C escreve tokens JSONL em `stdout` e erros JSONL em `stderr`. Os modulos C principais sao:
 
-## Requisitos
+- `C/scanner.c` e `C/scanner.h`: varredura do texto-fonte.
+- `C/token.c` e `C/token.h`: estrutura dos tokens.
+- `C/token_types.c` e `C/token_types.h`: tipos e palavras reservadas.
+- `C/errors.c` e `C/errors.h`: erros lexicos.
+- `C/util.c` e `C/util.h`: memoria, strings dinamicas e leitura de arquivos.
+- `C/main.c`: CLI e serializacao JSONL do scanner.
+- `C/parser.c`, `C/parser_main.c`: parser e entrada CLI do parser.
+- `C/ast.c` e `C/ast.h`: nos e serializacao da AST.
 
-### Python e interface grafica
-
-- Python 3.10 ou superior.
-- Tkinter para abrir a interface grafica.
-
-### Parser C e testes Bash
-
-- GCC com suporte a C11.
-- Bash.
-- Python disponivel no ambiente Bash para o runner dos testes.
-
-No Windows, a forma recomendada de obter Bash, GCC e Make e instalar o [MSYS2](https://www.msys2.org/) e abrir o terminal **MSYS2 UCRT64**.
-
-No MSYS2 UCRT64, instale o compilador com:
-
-```bash
-pacman -Syu
-```
-
-Se o terminal pedir para ser fechado, abra novamente o **MSYS2 UCRT64** e execute:
-
-```bash
-pacman -Su
-pacman -S --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-make
-```
-
-Confirme a instalacao:
-
-```bash
-gcc --version
-make --version
-python --version
-bash --version
-```
-
-## Estrutura principal
-
-```text
-Projeto_MiniC/
-├── main.py                    # Interface grafica e CLI principal
-├── parser.py                  # Entrada CLI do parser Python
-├── parser.c                   # Unidade C unica para o avaliador externo
-├── scanner.py                 # Entrada alternativa do lexer Python
-├── Makefile                   # Build dos binarios C
-├── testar_parser.sh           # Executa Python e C em conjunto
-├── testar_parser_python.sh    # Runner oficial do parser Python
-├── testar_parser_c.sh         # Runner oficial do parser C
-├── test_parser_50.py          # Runner Python dos 50 casos
-├── C/                         # Fontes da implementacao C
-│   ├── parser_main.c
-│   ├── parser.c
-│   ├── ast.c / ast.h
-│   ├── scanner.c / scanner.h
-│   ├── token.c / token.h
-│   ├── token_types.c / token_types.h
-│   ├── errors.c / errors.h
-│   └── util.c / util.h
-├── ProjetoMiniC/              # Pacotes Python e documentacao tecnica
-│   ├── src/lexer/
-│   ├── src/parser/
-│   ├── src/ast/
-│   ├── src/semantic/
-│   ├── src/codegen/
-│   ├── src/ir/
-│   └── src/optimizer/
-├── testes-parser-50/          # Casos externos de avaliacao
-└── tests/                     # Testes de regressao do projeto
-```
-
-## Abrir o projeto
-
-Abra no VS Code a pasta que contem `main.py`, `parser.py` e `parser.c`:
-
-```text
-C:\Users\guilherme.lima\OneDrive - Alpargatas S.A\Documentos\Projeto_MiniC
-```
-
-No MSYS2 UCRT64, entre nessa pasta com:
-
-```bash
-cd "/c/Users/guilherme.lima/OneDrive - Alpargatas S.A/Documentos/Projeto_MiniC"
-```
-
-Confira a estrutura:
-
-```bash
-ls parser.py parser.c testar_parser.sh testar_parser_python.sh testar_parser_c.sh
-```
-
-## Interface grafica
-
-Na raiz do projeto, execute:
-
-```bash
-python main.py
-```
-
-A interface do analisador sintatico permite:
-
-- digitar ou abrir um arquivo MiniC/C;
-- analisar o codigo;
-- visualizar a AST em S-expression;
-- visualizar a arvore sintatica;
-- consultar tokens e diagnosticos;
-- copiar a AST;
-- executar os 50 casos oficiais.
-
-O botao **Teste automatico (50 casos)** usa o mesmo runner da suite externa.
-
-O lexer tambem pode ser executado pela CLI:
-
-```bash
-python main.py caminho/para/arquivo.minic
-python main.py caminho/para/arquivo.minic --tokens
-python main.py caminho/para/arquivo.minic --errors
-python main.py caminho/para/arquivo.minic --jsonl
-```
-
-## Parser Python
-
-Para analisar um arquivo individual:
-
-```bash
-python parser.py caminho/para/arquivo.c
-```
-
-Exemplo de saida:
-
-```text
-Program(Function(int main() Block(Return(Lit(int,0)))))
-```
-
-O parser Python usa somente a biblioteca padrao, alem do Tkinter para a interface grafica.
-
-## Parser C
-
-O arquivo [parser.c](parser.c) na raiz e uma unidade de compilacao unica para o avaliador externo. Ele agrega o `main` do parser e os modulos localizados em `C/`.
-
-Para compilar e executar diretamente com Make:
-
-```bash
-make parser
-./parser caminho/para/arquivo.c
-```
-
-No Windows, o executavel pode ser criado como `parser.exe`:
-
-```bash
-./parser.exe caminho/para/arquivo.c
-```
-
-O build C usa C11, `-Wall`, `-Wextra`, `-pedantic` e `-O2`.
+O `Makefile` tambem compila os modulos C separadamente. A unidade `scanner.c` da raiz e destinada aos scripts que compilam um unico arquivo; a pasta `C/` preserva a organizacao modular usada pelo Makefile.
 
 ## Testes oficiais do professor
 
@@ -348,6 +202,19 @@ make test-invalid
 make test
 ```
 
+### Testes por fixtures JSONL
+
+Os scripts `test_scanner_python.sh` e `test_scanner_c.sh` percorrem arquivos `.expected.jsonl`, executam o scanner correspondente e comparam a sequencia de tokens gerada com os fixtures. Os casos lexicos ficam principalmente em `ProjetoMiniC/casos-invalidos/` e os programas validos ficam em `ProjetoMiniC/casos-programas-c/`.
+
+Exemplos de uso a partir da raiz:
+
+```bash
+bash test_scanner_python.sh ./scanner.py ./ProjetoMiniC
+bash test_scanner_c.sh ./scanner.c ./ProjetoMiniC
+```
+
+O scanner C e compilado para um executavel temporario ou local chamado `scanner`. Os fixtures verificam tokens em JSONL; quando existe um arquivo `.errors.jsonl`, tambem verificam os diagnosticos lexicos esperados.
+
 ## Codigos de saida
 
 | Codigo | Significado |
@@ -356,18 +223,25 @@ make test
 | 1 | Uso incorreto ou erro de leitura |
 | 2 | Erro lexico |
 | 3 | Erro sintatico |
-|
 
 Os parsers Python e C seguem esse contrato para a CLI. A interface grafica apresenta os mesmos resultados em suas abas de AST, arvore, diagnosticos e tokens.
 
 ## Documentacao tecnica
 
 - `ProjetoMiniC/docs/README.md`: detalhes da implementacao Python.
-- `ProjetoMiniC/docs/gramatica.ebnf`: gramatica da linguagem.
-- `ProjetoMiniC/docs/especificacao.md`: especificacao do projeto.
-- `ProjetoMiniC/docs/arquitetura.md`: arquitetura do compilador.
+- `ProjetoMiniC/docs/gramatica.ebnf`: arquivo reservado para a gramatica EBNF completa; a gramatica usada pelo parser esta implementada em `src/parser/parser.py` e em `C/parser.c`.
+- `ProjetoMiniC/docs/especificacao.md`: especificacao lexica executavel, regras de tokens, recuperacao e formato JSONL.
+- `ProjetoMiniC/docs/arquitetura.md`: documento reservado para a arquitetura geral do compilador.
 - `testes-parser-50/README.md`: formato e regras do pacote externo.
 - `testes-parser-50/EXECUCAO.txt`: comandos minimos por caso.
+
+## Limitacoes atuais
+
+- A analise semantica ainda nao esta implementada.
+- Os pacotes de IR, otimizacao e geracao de codigo ainda sao estruturas de organizacao.
+- A interface grafica oferece atalhos para essas etapas, mas informa que estao em desenvolvimento.
+- O projeto analisa e representa programas MiniC; ele ainda nao executa os programas nem gera um executavel final.
+- O pacote de testes externos valida a AST e a rejeicao sintatica, nao a execucao do programa.
 
 ## Limpeza
 
@@ -388,55 +262,6 @@ Os scripts de teste usam diretorios temporarios para o executavel C e os removem
 - Make.
 - Bash.
 - JSONL para a troca de tokens e diagnosticos do lexer.
-# Projeto MiniC
-
-Compilador para a linguagem **MiniC** (um subconjunto de C), desenvolvido em duas implementações paralelas:
-
-- **Python** — implementação principal, em `ProjetoMiniC/src`
-- **C** — implementação do analisador léxico, em `C/`
-
-O objetivo é construir, em etapas, um pipeline de compilação completo: análise léxica, análise sintática, análise semântica, geração de código intermediário, otimização e geração de código final.
-
-## Estado atual
-
-| Etapa | Python | C |
-|---|---|---|
-| Análise léxica | ✅ Implementada | ✅ Implementada |
-| Análise sintática | 🚧 Estrutura criada (`src/parser`), ainda não implementada | — |
-| Análise semântica | 🚧 Estrutura criada (`src/semantic`), ainda não implementada | — |
-| AST | 🚧 Estrutura criada (`src/ast`) | — |
-| Geração de código / IR / otimização | 🚧 Estruturas criadas (`src/codegen`, `src/ir`, `src/optimizer`) | — |
-
-O lexer é o módulo mais maduro do projeto e serve de referência para os demais.
-
-## Estrutura do repositório
-
-```text
-Projeto_MiniC/
-├── main.py                      # Ponto de entrada raiz (CLI + GUI) da versão Python
-├── scanner.py                   # Ponto de entrada alternativo, com resolução automática de path
-├── Makefile                     # Build da versão em C (deve ser executado a partir de C/)
-├── C/                            # Implementação do lexer em C
-│   ├── main.c
-│   ├── scanner.c / scanner.h
-│   ├── token.c / token.h
-│   ├── token_types.c / token_types.h
-│   ├── errors.c / errors.h
-│   └── util.c / util.h
-└── ProjetoMiniC/                # Implementação em Python + recursos do projeto
-    ├── docs/                     # Especificação, gramática (EBNF) e notas de arquitetura
-    ├── casos-programas-c/        # Programas .c válidos usados como casos de teste
-    ├── casos-invalidos/          # Casos .minic com erros léxicos propositais
-    └── src/
-        ├── lexer/                # Análise léxica (scanner, tokens, erros, JSONL, GUI)
-        ├── parser/                # (em construção)
-        ├── semantic/              # (em construção)
-        ├── ast/                   # (em construção)
-        ├── codegen/                # (em construção)
-        ├── ir/                     # (em construção)
-        └── optimizer/               # (em construção)
-```
-
 ## Executando a versão em Python
 
 Requer Python 3.10+ (o projeto usa `from __future__ import annotations`) e Tkinter instalado para a interface gráfica.
