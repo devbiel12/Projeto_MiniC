@@ -39,11 +39,16 @@ def normalize_ast(text):
     return "".join(normalized)
 
 
-def run_case(parser_path, case_dir):
+def run_case(parser_path, case_dir, native_path=None):
     source_path = case_dir / "codigo.c"
     expected_path = case_dir / "ast.esperada.txt"
+    command = (
+        [str(native_path), str(source_path)]
+        if native_path is not None
+        else [sys.executable, str(parser_path), str(source_path)]
+    )
     result = subprocess.run(
-        [sys.executable, str(parser_path), str(source_path)],
+        command,
         cwd=parser_path.parent,
         capture_output=True,
         text=True,
@@ -78,6 +83,12 @@ def main():
         type=Path,
         default=None,
         help="pasta casos do pacote testes-parser-50",
+    )
+    argument_parser.add_argument(
+        "--native",
+        type=Path,
+        default=None,
+        help="executável nativo do parser C",
     )
     args = argument_parser.parse_args()
     candidates = []
@@ -122,7 +133,7 @@ def main():
     failed = []
     results = []
     for case_dir in case_dirs:
-        ok, detail = run_case(parser_path, case_dir)
+        ok, detail = run_case(parser_path, case_dir, args.native)
         case_id = int(case_dir.name.split("_", 1)[0])
         if ok:
             passed += 1
