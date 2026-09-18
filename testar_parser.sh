@@ -19,7 +19,6 @@ if ! bash testar_parser_python.sh "$TEST_ROOT" "$PYTHON_PARSER" >"$tmp_dir/pytho
     status=1
 fi
 
-echo "=== TESTE DO PARSER C ==="
 if ! bash testar_parser_c.sh "$TEST_ROOT" "$C_PARSER" >"$tmp_dir/c.out"; then
     status=1
 fi
