@@ -1,5 +1,4 @@
-"""Análise semântica do compilador MiniC."""
+"""MiniC semantic analysis over the parser's AST."""
+from .analyzer import Diagnostic, SemanticAnalyzer, Symbol
 
-from .semantic import Diagnostic, Scope, SemanticAnalyzer, SemanticResult, Symbol, analyze
-
-__all__ = ["Diagnostic", "Scope", "SemanticAnalyzer", "SemanticResult", "Symbol", "analyze"]
+__all__ = ['Diagnostic', 'SemanticAnalyzer', 'Symbol']

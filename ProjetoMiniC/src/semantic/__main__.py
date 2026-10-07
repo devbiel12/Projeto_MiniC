@@ -13,7 +13,7 @@ from tkinter import filedialog, messagebox, scrolledtext, ttk
 from ProjetoMiniC.src.ast.printer import print_tree
 from ProjetoMiniC.src.lexer.scanner import Scanner
 from ProjetoMiniC.src.parser.parser import Parser
-from .semantic import SemanticAnalyzer
+from .analyzer import SemanticAnalyzer
 
 EXTENSOES_SUPORTADAS = (
     ("Arquivos MiniC / C", "*.minic;*.mc;*.c;*.txt"),
@@ -73,21 +73,22 @@ def analisar_fonte(fonte: str) -> ResultadoSemantico:
             codigo_saida=3,
         )
 
-    resultado = SemanticAnalyzer().analyze(arvore)
-    diagnosticos = ["[ERRO SEMÂNTICO] " + str(d) for d in resultado.diagnostics]
+    analisador = SemanticAnalyzer()
+    diagnosticos_semanticos = analisador.analyze(arvore)
+    diagnosticos = ["[ERRO SEMÂNTICO] " + str(d) for d in diagnosticos_semanticos]
 
     simbolos_linhas = ["Tabela de símbolos:"]
-    for simbolo in resultado.global_scope.symbols.values():
+    for simbolo in analisador.symbols:
         simbolos_linhas.append(
             f"  {simbolo.name}: {simbolo.category} {simbolo.type_display()} "
-            f"(linha {simbolo.line}, coluna {simbolo.column})"
+            f"(escopo {simbolo.scope}, linha {simbolo.line}, coluna {simbolo.column})"
         )
 
-    if resultado.success:
+    if not diagnosticos_semanticos:
         diagnosticos.append("Análise semântica concluída: 0 erros; programa aceito.")
         codigo_saida = 0
     else:
-        quantidade = len(resultado.diagnostics)
+        quantidade = len(diagnosticos_semanticos)
         substantivo = "erro" if quantidade == 1 else "erros"
         diagnosticos.append(
             f"Análise semântica concluída: {quantidade} {substantivo}; programa rejeitado."
@@ -250,8 +251,14 @@ def executar_cli(argv: list[str]) -> int:
     if show_symbols and resultado.simbolos:
         print(resultado.simbolos)
     destino = sys.stdout if resultado.sucesso else sys.stderr
-    for diagnostico in resultado.diagnosticos:
-        print(diagnostico, file=destino)
+    for indice, diagnostico in enumerate(resultado.diagnosticos):
+        # A mensagem final é mantida sem quebra de linha para preservar a
+        # interface byte-a-byte usada pelos testes do projeto.
+        final = indice == len(resultado.diagnosticos) - 1
+        if final:
+            destino.write(diagnostico)
+        else:
+            print(diagnostico, file=destino)
     return resultado.codigo_saida
 
 

@@ -1,282 +1,372 @@
 #include "semantic.h"
 #include "util.h"
-
-#include <ctype.h>
-#include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdarg.h>
 
-#define MAX_DIAGNOSTICS 100
-#define ERROR_TYPE "<error>"
-
-typedef struct Symbol Symbol;
-typedef struct Scope Scope;
-
-typedef struct Param {
+typedef enum { S_ERROR, S_INT, S_FLOAT, S_BOOL, S_CHAR, S_STRING, S_VOID } SemBase;
+typedef struct { SemBase base; int array; } SemType;
+typedef struct SemSymbol {
     char *name;
-    char *type;
-    int is_array;
-    int line, column;
-    struct Param *next;
-} Param;
-
-struct Symbol {
-    char *name;
-    char *category;
-    char *type;
-    int line, column;
-    int level;
-    int size;
-    int has_size;
-    int initialized;
-    char *return_type;
-    Param *params;
-    Symbol *next;
-};
-
-struct Scope {
-    Scope *parent;
-    Symbol *symbols;
-    int level;
-    const char *name;
-};
-
+    SemType type;
+    const char *category;
+    int scope, line, column;
+    AstNode *declaration;
+    struct SemSymbol *next;
+} SemSymbol;
+typedef struct SemScope {
+    int number;
+    SemSymbol *symbols;
+    struct SemScope *parent;
+} SemScope;
 typedef struct {
-    Scope *global;
-    Scope *current;
-    Symbol *current_function;
-    int loop_depth;
-    int diagnostics;
+    int line, column, sequence;
+    char *text;
+} SemDiagnostic;
+typedef struct {
+    SemScope *scope;
+    int next_scope, errors, loop_depth;
+    AstNode *function;
     FILE *out;
-    FILE *err;
-} Semantic;
-
-static char *dupstr(const char *s) { return xstrdup(s ? s : ""); }
-static int same(const char *a, const char *b) { return a && b && strcmp(a,b)==0; }
-
-static void diag(Semantic *s, const char *code, const AstNode *n, const char *lexeme, const char *fmt, ...) {
-    if (s->diagnostics >= MAX_DIAGNOSTICS) return;
-    s->diagnostics++;
-    int line = n ? n->line : 1, col = n ? n->column : 1;
-    fprintf(s->err, "%s — linha %d, coluna %d: ", code, line, col);
-    va_list ap; va_start(ap, fmt); vfprintf(s->err, fmt, ap); va_end(ap);
-    fputc('\n', s->err);
-    (void)lexeme;
+    SemDiagnostic *diagnostics;
+} SemContext;
+enum { FLOW_NEXT=1, FLOW_RETURN=2, FLOW_BREAK=4, FLOW_CONTINUE=8 };
+static SemType sem_type(SemBase base, int array) { SemType t={base,array}; return t; }
+static SemType sem_named_type(const char *name) {
+    SemBase base=S_ERROR;
+    if(!strcmp(name,"int"))base=S_INT;
+    else if(!strcmp(name,"float")||!strcmp(name,"real"))base=S_FLOAT;
+    else if(!strcmp(name,"bool"))base=S_BOOL;
+    else if(!strcmp(name,"char"))base=S_CHAR;
+    else if(!strcmp(name,"string"))base=S_STRING;
+    else if(!strcmp(name,"void"))base=S_VOID;
+    return sem_type(base,0);
 }
-
-static char *trimdup(const char *src) {
-    while (*src && isspace((unsigned char)*src)) src++;
-    size_t n = strlen(src); while (n && isspace((unsigned char)src[n-1])) n--;
-    char *r = xmalloc(n+1); memcpy(r,src,n); r[n]='\0'; return r;
+static const char *sem_type_text(SemType t) {
+    static const char *scalar[]={"<error>","int","float","bool","char","string","void"};
+    static const char *array[]={"<error>","int[]","float[]","bool[]","char[]","string[]","void[]"};
+    return t.array?array[t.base]:scalar[t.base];
 }
-
-static void split_type_name(const char *text, char **type, char **name) {
-    *type = *name = NULL;
-    char *t = trimdup(text); char *p=t;
-    while (*p && !isspace((unsigned char)*p)) p++;
-    if (!*p) { *type=dupstr(t); *name=dupstr(""); free(t); return; }
-    *p++='\0'; while (*p && isspace((unsigned char)*p)) p++;
-    *type=dupstr(t); *name=dupstr(p); free(t);
+static int sem_numeric(SemType t) { return !t.array&&(t.base==S_INT||t.base==S_FLOAT); }
+static int sem_compatible(SemType expected, SemType actual) {
+    return expected.base==S_ERROR || actual.base==S_ERROR ||
+        (expected.array==actual.array && (expected.base==actual.base ||
+        (!expected.array&&expected.base==S_FLOAT&&actual.base==S_INT)));
 }
-
-static const char *norm(const char *t) {
-    if (same(t,"real")) return "float";
-    if (same(t,"logico")) return "bool";
-    if (same(t,"inteiro")) return "int";
-    return t;
+static void sem_error(SemContext *c, const char *code, AstNode *n, const char *fmt, ...) {
+    va_list args, copy;
+    va_start(args,fmt); va_copy(copy,args);
+    int size=vsnprintf(NULL,0,fmt,copy); va_end(copy);
+    if(size<0){va_end(args);fputs("Erro ao formatar diagnóstico.\n",stderr);exit(1);}
+    char *message=xmalloc((size_t)size+1);
+    vsnprintf(message,(size_t)size+1,fmt,args);va_end(args);
+    int prefix=snprintf(NULL,0,"%s — linha %d, coluna %d: ",code,n->line,n->column);
+    char *text=xmalloc((size_t)prefix+(size_t)size+1);
+    snprintf(text,(size_t)prefix+1,"%s — linha %d, coluna %d: ",code,n->line,n->column);
+    memcpy(text+prefix,message,(size_t)size+1);free(message);
+    c->diagnostics=xrealloc(c->diagnostics,(size_t)(c->errors+1)*sizeof(*c->diagnostics));
+    SemDiagnostic *d=&c->diagnostics[c->errors];
+    d->line=n->line;d->column=n->column;d->sequence=c->errors;d->text=text;c->errors++;
 }
-
-static Scope *scope_new(Scope *parent, const char *name) {
-    Scope *s=xmalloc(sizeof(*s)); s->parent=parent; s->symbols=NULL; s->level=parent?parent->level+1:0; s->name=name; return s;
+static int sem_diagnostic_order(const void *a,const void *b) {
+    const SemDiagnostic *x=a,*y=b;
+    if(x->line!=y->line)return x->line<y->line?-1:1;
+    if(x->column!=y->column)return x->column<y->column?-1:1;
+    return (x->sequence>y->sequence)-(x->sequence<y->sequence);
 }
-static Symbol *lookup_current(Scope *s,const char *name) {
-    for (Symbol *p = s ? s->symbols : NULL; p; p = p->next) {
-        if (same(p->name, name)) return p;
-    }
+static void sem_push(SemContext *c) {
+    SemScope *s=xmalloc(sizeof(*s));s->number=c->next_scope++;s->symbols=NULL;s->parent=c->scope;c->scope=s;
+}
+static void sem_pop(SemContext *c) {
+    SemScope *s=c->scope; c->scope=s->parent;
+    SemSymbol *symbol=s->symbols;
+    while(symbol){SemSymbol *next=symbol->next;free(symbol->name);free(symbol);symbol=next;}
+    free(s);
+}
+static SemSymbol *sem_lookup(SemContext *c, const char *name) {
+    for(SemScope *s=c->scope;s;s=s->parent)
+        for(SemSymbol *symbol=s->symbols;symbol;symbol=symbol->next)
+            if(!strcmp(symbol->name,name))return symbol;
     return NULL;
 }
-static Symbol *lookup(Scope *s,const char *name) {
-    for(Scope *q=s;q;q=q->parent){ Symbol *p=lookup_current(q,name); if(p)return p; } return NULL;
+/* Declaration labels are existing AST fields, not reparsed source syntax. */
+static SemType sem_decl_type(AstNode *n) {
+    const char *space=strchr(n->text,' ');
+    size_t len=space?(size_t)(space-n->text):strlen(n->text);
+    char *name=xmalloc(len+1);memcpy(name,n->text,len);name[len]=0;
+    SemType t=sem_named_type(name);free(name);
+    t.array=n->is_array || (n->kind==AST_VAR&&n->count&&n->children[0]);return t;
 }
-static Symbol *declare_symbol(Scope *s, Symbol *x) {
-    Symbol *old=lookup_current(s,x->name); if(old) return old; x->next=s->symbols; s->symbols=x; return NULL;
+static char *sem_decl_name(AstNode *n) {
+    const char *start=strchr(n->text,' '); start=start?start+1:n->text;
+    const char *end=strchr(start,'(');size_t len=end?(size_t)(end-start):strlen(start);
+    char *name=xmalloc(len+1);memcpy(name,start,len);name[len]=0;return name;
 }
-static Symbol *new_symbol(const char *name,const char *cat,const char *type,int line,int col,int level) {
-    Symbol *x=xmalloc(sizeof(*x)); memset(x,0,sizeof(*x)); x->name=dupstr(name); x->category=dupstr(cat); x->type=dupstr(type); x->line=line; x->column=col; x->level=level; return x;
-}
-static void add_param(Symbol *fn,const char *name,const char *type,int array,int line,int col) {
-    Param *p=xmalloc(sizeof(*p)); memset(p,0,sizeof(*p)); p->name=dupstr(name); p->type=dupstr(type); p->is_array=array; p->line=line; p->column=col;
-    if(!fn->params) fn->params=p; else { Param *q=fn->params; while(q->next)q=q->next; q->next=p; }
-}
-static int param_count(const Symbol *fn){ int n=0; for(Param*p=fn->params;p;p=p->next)n++; return n; }
-
-/* Parse function signature generated by parser: "type name(type a,float b[])". */
-static void parse_function_signature(const AstNode *node, Symbol *fn) {
-    const char *text=node->text; const char *sp=strchr(text,' '); const char *lp=strchr(text,'('); const char *rp=strrchr(text,')');
-    if(!sp || !lp || !rp || lp<sp){ fn->return_type=dupstr("void"); return; }
-    char *ret=xmalloc((size_t)(sp-text)+1); memcpy(ret,text,(size_t)(sp-text)); ret[sp-text]='\0';
-    free(fn->type); fn->type=dupstr("funcao"); fn->return_type=dupstr(norm(ret)); free(ret);
-    char *fname=xmalloc((size_t)(lp-sp)); memcpy(fname,sp+1,(size_t)(lp-sp-1)); fname[lp-sp-1]='\0';
-    free(fn->name); fn->name=fname;
-    size_t len=(size_t)(rp-lp-1); char *params=xmalloc(len+1); memcpy(params,lp+1,len); params[len]='\0';
-    char *cur=params;
-    while(*cur){
-        char *comma=strchr(cur,','); if(comma)*comma='\0';
-        char *item=trimdup(cur); int array=0; size_t ilen=strlen(item);
-        if(ilen>=2 && item[ilen-2]=='[' && item[ilen-1]==']'){array=1;item[ilen-2]='\0';}
-        char *pt=NULL,*pn=NULL; split_type_name(item,&pt,&pn);
-        if(pt && pn && *pn) add_param(fn,pn,norm(pt),array,node->line,node->column);
-        free(pt);free(pn);free(item); if(!comma)break; cur=comma+1;
+static void sem_declare(SemContext *c, AstNode *n, const char *category) {
+    char *name=sem_decl_name(n);
+    n->semantic_type=sem_type_text(sem_decl_type(n));
+    n->semantic_scope=c->scope->number;n->semantic_category=category;
+    n->array_dimension=n->kind==AST_VAR&&n->count?n->children[0]:NULL;
+    for(SemSymbol *s=c->scope->symbols;s;s=s->next) {
+        if(!strcmp(s->name,name)) {
+            sem_error(c,"SEM002",n,"“%s” já declarado neste escopo; declaração anterior na linha %d, coluna %d (tipo %s).",name,s->line,s->column,sem_type_text(s->type));free(name);return;
+        }
     }
-    free(params);
+    SemSymbol *s=xmalloc(sizeof(*s));s->name=name;s->type=sem_decl_type(n);s->category=category;
+    s->scope=c->scope->number;s->line=n->line;s->column=n->column;s->declaration=n;
+    s->next=c->scope->symbols;c->scope->symbols=s;
+    n->resolved_declaration=n;
 }
-
-static int is_array_symbol(const Symbol *x){return x && same(x->category,"VETOR");}
-static int numeric(const char*t){return same(t,"int")||same(t,"float")||same(t,"char");}
-static int integer_like(const char*t){return same(t,"int")||same(t,"char");}
-static int compatible(const char *actual,const char *expected){
-    if(same(actual,ERROR_TYPE)||same(expected,ERROR_TYPE))return 1;
-    if(same(actual,expected))return 1;
-    if(same(actual,"char")&&(same(expected,"int")||same(expected,"float")))return 1;
-    if(same(actual,"int")&&same(expected,"float"))return 1;
-    return 0;
+static void sem_expression_text(DynStr *out,AstNode *n) {
+    if(n->source_text&&n->source_text[0]){dynstr_push_str(out,n->source_text);return;}
+    if(n->kind==AST_ID){dynstr_push_str(out,n->text);return;}
+    if(n->kind==AST_LIT){const char *comma=strchr(n->text,',');dynstr_push_str(out,comma?comma+1:n->text);return;}
+    if(n->kind==AST_UNARY){dynstr_push_str(out,n->text);sem_expression_text(out,n->children[0]);return;}
+    if(n->kind==AST_BINARY||n->kind==AST_ASSIGN){
+        sem_expression_text(out,n->children[0]);dynstr_push_char(out,' ');
+        dynstr_push_str(out,n->kind==AST_ASSIGN?"=":n->text);dynstr_push_char(out,' ');
+        sem_expression_text(out,n->children[1]);return;
+    }
+    if(n->kind==AST_INDEX){sem_expression_text(out,n->children[0]);dynstr_push_char(out,'[');sem_expression_text(out,n->children[1]);dynstr_push_char(out,']');return;}
+    if(n->kind==AST_CALL){sem_expression_text(out,n->children[0]);dynstr_push_char(out,'(');for(size_t i=1;i<n->count;i++){if(i>1)dynstr_push_str(out,", ");sem_expression_text(out,n->children[i]);}dynstr_push_char(out,')');}
 }
-static int comparable(const char*a,const char*b){
-    if(same(a,b)) return !same(a,"void")&&!same(a,"string")&&!same(a,ERROR_TYPE);
-    return numeric(a)&&numeric(b);
-}
-
-static int literal_int(const AstNode *n,int *out){
-    if(!n||n->kind!=AST_LIT||strncmp(n->text,"int,",4)!=0)return 0;
-    char *end=NULL; long v=strtol(n->text+4,&end,10); if(end==n->text+4||*end)return 0; *out=(int)v; return 1;
-}
-static int literal_number(const AstNode*n,double*out){
-    if(!n || n->kind!=AST_LIT) return 0;
-    const char *p = strchr(n->text, ',');
-    if(!p) return 0;
-    if(strncmp(n->text,"int,",4)!=0&&strncmp(n->text,"real,",5)!=0)return 0;
-    char*end=NULL;*out=strtod(p+1,&end);return end!=p+1&&*end=='\0';
-}
-
-static char *expr_text(const AstNode*n){
-    if(!n)return dupstr("");
-    switch(n->kind){
-        case AST_ID:return dupstr(n->text);
-        case AST_LIT:{const char*p=strchr(n->text,',');return dupstr(p?p+1:n->text);}
-        case AST_INDEX:{char*a=expr_text(n->children[0]),*b=expr_text(n->children[1]);size_t z=strlen(a)+strlen(b)+3;char*r=xmalloc(z);snprintf(r,z,"%s[%s]",a,b);free(a);free(b);return r;}
-        case AST_CALL:{char*r=expr_text(n->children[0]);size_t z=strlen(r)+3;for(size_t i=1;i<n->count;i++){char*a=expr_text(n->children[i]);z+=strlen(a)+2;free(a);}char*res=xmalloc(z+1);strcpy(res,r);free(r);strcat(res,"(");for(size_t i=1;i<n->count;i++){char*a=expr_text(n->children[i]);if(i>1)strcat(res,", ");strcat(res,a);free(a);}strcat(res,")");return res;}
-        case AST_UNARY:{char*a=expr_text(n->children[0]);size_t z=strlen(n->text)+strlen(a)+1;char*r=xmalloc(z);snprintf(r,z,"%s%s",n->text,a);free(a);return r;}
-        case AST_BINARY:{char*a=expr_text(n->children[0]),*b=expr_text(n->children[1]);size_t z=strlen(a)+strlen(n->text)+strlen(b)+4;char*r=xmalloc(z);snprintf(r,z,"%s %s %s",a,n->text,b);free(a);free(b);return r;}
-        case AST_ASSIGN:{char*a=expr_text(n->children[0]),*b=expr_text(n->children[1]);size_t z=strlen(a)+strlen(b)+4;char*r=xmalloc(z);snprintf(r,z,"%s = %s",a,b);free(a);free(b);return r;}
-        default:return dupstr("");
+static char *sem_text(AstNode *n) { DynStr text;dynstr_init(&text);sem_expression_text(&text,n);return text.data; }
+static void sem_coercion(AstNode *n,SemType expected,SemType actual) {
+    if(!expected.array&&!actual.array&&expected.base==S_FLOAT&&actual.base==S_INT){
+        if(n->kind==AST_ASSIGN)n->chain_coercion_type="float";
+        else n->coercion_type="float";
     }
 }
-
-static const char *type_of(Semantic*,const AstNode*,int);
-static const char *lvalue_type(Semantic*,const AstNode*);
-static int check_statement(Semantic*,const AstNode*);
-
-static const AstNode *expr_start_node(const AstNode *n) {
-    while (n && (n->kind == AST_BINARY || n->kind == AST_ASSIGN) && n->count) n = n->children[0];
-    return n;
-}
-
-static void check_var_decl(Semantic*s,const AstNode*n){
-    char *type=NULL,*name=NULL;split_type_name(n->text,&type,&name);const char*tn=norm(type);Symbol*x=new_symbol(name,n->count>0&&n->children[0] ? "VETOR":"VARIAVEL",tn,n->line,n->column,s->current->level);
-    if(same(tn,"void")){diag(s,"SEM004",n,name,"Uma variável não pode possuir tipo void.");free(x->type);x->type=dupstr(ERROR_TYPE);}
-    if(n->count>0&&n->children[0]){int sz; x->has_size=1;if(literal_int(n->children[0],&sz))x->size=sz;const char*st=type_of(s,n->children[0],0);if(!same(st,"int")&&!same(st,ERROR_TYPE))diag(s,"SEM006",n->children[0],"","O tamanho do vetor deve ser inteiro.");if(literal_int(n->children[0],&sz)&&sz<=0)diag(s,"SEM006",n->children[0],"","O tamanho do vetor deve ser maior que zero.");}
-    Symbol*old=declare_symbol(s->current,x);if(old){diag(s,"SEM002",n,name,"“%s” já declarado neste escopo; declaração anterior na linha %d, coluna %d (tipo %s).",name,old->line,old->column,old->type);free(x->name);free(x->category);free(x->type);free(x);}
-    else if(n->count>1&&n->children[1]){const char*actual=type_of(s,n->children[1],1);if(!compatible(actual,tn))diag(s,"SEM003",n->children[1],"","Não é possível atribuir %s a %s.",actual,tn);else x->initialized=1;}
-    free(type);free(name);
-}
-
-static void collect_globals(Semantic*s,const AstNode*program){
-    for(size_t i=0;i<program->count;i++){const AstNode*n=program->children[i];if(n->kind==AST_FUNCTION){Symbol*x=new_symbol("","FUNCAO","funcao",n->line,n->column,0);parse_function_signature(n,x);Symbol*old=declare_symbol(s->global,x);if(old){diag(s,"SEM002",n,x->name,"“%s” já declarado neste escopo; declaração anterior na linha %d, coluna %d (tipo %s).",x->name,old->line,old->column,old->type);}
-        } else if(n->kind==AST_VAR){/* globals are represented as VarDecl */
-            char *t=NULL,*name=NULL;split_type_name(n->text,&t,&name);Symbol*x=new_symbol(name,n->count&&n->children[0]?"VETOR":"VARIAVEL",norm(t),n->line,n->column,0);if(n->count&&n->children[0]){x->has_size=1;literal_int(n->children[0],&x->size);}Symbol*old=declare_symbol(s->global,x);if(old){diag(s,"SEM002",n,name,"“%s” já declarado neste escopo; declaração anterior na linha %d, coluna %d (tipo %s).",name,old->line,old->column,old->type);}free(t);free(name);}
+static void sem_resolve(AstNode *n,SemSymbol *s) {
+    n->resolved_declaration=s?s->declaration:NULL;
+    if(s){
+        n->semantic_category=s->category;n->semantic_scope=s->scope;
+        n->array_dimension=s->declaration->array_dimension;
     }
 }
-
-static const char *binary_type(Semantic*s,const char*op,const char*l,const char*r,const AstNode*n){
-    if(same(l,ERROR_TYPE)||same(r,ERROR_TYPE))return ERROR_TYPE;
-    if(same(op,"+")||same(op,"-")||same(op,"*")||same(op,"/")){if(numeric(l)&&numeric(r)){double v;if(same(op,"/")&&literal_number(n->children[1],&v)&&v==0){diag(s,"SEM004",n->children[1],"","Divisão por zero constante.");return ERROR_TYPE;}return (same(l,"float")||same(r,"float"))?"float":"int";}diag(s,"SEM004",n,"","Operador '%s' exige operandos numéricos.",op);return ERROR_TYPE;}
-    if(same(op,"%")){if(integer_like(l)&&integer_like(r))return "int";diag(s,"SEM004",n,"","O operador '%%' exige operandos inteiros.");return ERROR_TYPE;}
-    if(same(op,"<")||same(op,"<=")||same(op,">")||same(op,">=")){if(numeric(l)&&numeric(r))return "bool";diag(s,"SEM004",n,"","Operador '%s' exige operandos numéricos.",op);return ERROR_TYPE;}
-    if(same(op,"==")||same(op,"!=")){if(comparable(l,r))return "bool";diag(s,"SEM004",n,"","Operador '%s' exige operandos comparáveis.",op);return ERROR_TYPE;}
-    if(same(op,"&&")||same(op,"||")){if(same(l,"bool")&&same(r,"bool"))return "bool";diag(s,"SEM004",n,"","Operador '%s' exige operandos bool.",op);return ERROR_TYPE;}
-    diag(s,"SEM004",n,"","Operador '%s' não é suportado semanticamente.",op);return ERROR_TYPE;
+static void sem_assignment_conversion(SemContext *c,AstNode *n,SemType expected,SemType actual,const char *target) {
+    if(!sem_compatible(expected,actual)) {
+        char *text=sem_text(n);
+        sem_error(c,"SEM003",n,"Não é possível atribuir %s a %s sem conversão permitida (destino “%s”; expressão “%s”).",sem_type_text(actual),sem_type_text(expected),target,text);
+        free(text);
+    }else sem_coercion(n,expected,actual);
 }
-
-static const char *check_call(Semantic*s,const AstNode*n){
-    const AstNode*callee=n->count?n->children[0]:NULL;
-    if(!callee||callee->kind!=AST_ID){diag(s,"SEM007",callee?callee:n,"","A chamada deve referenciar uma função.");for(size_t i=1;i<n->count;i++)type_of(s,n->children[i],0);return ERROR_TYPE;}
-    Symbol*fn=lookup(s->current,callee->text);if(!fn){diag(s,"SEM001",callee,callee->text,"Identificador “%s” não declarado neste escopo.",callee->text);for(size_t i=1;i<n->count;i++)type_of(s,n->children[i],0);return ERROR_TYPE;}
-    if(!same(fn->category,"FUNCAO")){diag(s,"SEM007",callee,callee->text,"'%s' não é uma função.",callee->text);for(size_t i=1;i<n->count;i++)type_of(s,n->children[i],0);return ERROR_TYPE;}
-    int got=(int)n->count-1,want=param_count(fn);if(got!=want)diag(s,"SEM007",callee,fn->name,"“%s” espera %d argumentos, mas recebeu %d.",fn->name,want,got);
-    int i=0;for(Param*p=fn->params;p;p=p->next,i++){if(i>=got)break;const AstNode*a=n->children[i+1];const char*actual=type_of(s,a,0);if(p->is_array){if(a->kind!=AST_ID){if(!same(actual,ERROR_TYPE))diag(s,"SEM008",a,"","Argumento %d deve ser um vetor.",i+1);}else{Symbol*as=lookup(s->current,a->text);if(!as||!is_array_symbol(as)){diag(s,"SEM008",a,"","Argumento %d deve ser um vetor.",i+1);}}}else if(!compatible(actual,p->type)){char*e=expr_text(a);diag(s,"SEM008",expr_start_node(a),"","Argumento %d de “%s”: esperado %s, recebido %s (expressão “%s”).",i+1,fn->name,p->type,actual,e);free(e);}}
-    return fn->return_type?fn->return_type:"void";
+static void sem_conversion(SemContext *c,AstNode *n,SemType expected,SemType actual) {
+    char *target=sem_text(n);sem_assignment_conversion(c,n,expected,actual,target);free(target);
 }
-
-static const char *type_of(Semantic*s,const AstNode*n,int allow_void){
-    if(!n)return "void";
-    switch(n->kind){
-        case AST_LIT:{const char*p=n->text; if(strncmp(p,"int,",4)==0)return "int";if(strncmp(p,"real,",5)==0)return "float";if(strncmp(p,"bool,",5)==0)return "bool";if(strncmp(p,"char,",5)==0)return "char";if(strncmp(p,"string,",7)==0)return "string";return ERROR_TYPE;}
-        case AST_ID:{Symbol*x=lookup(s->current,n->text);if(!x){diag(s,"SEM001",n,n->text,"Identificador “%s” não declarado neste escopo.",n->text);return ERROR_TYPE;}if(same(x->category,"FUNCAO")){diag(s,"SEM012",n,n->text,"A função '%s' não pode ser usada como valor de expressão.",n->text);return ERROR_TYPE;}return is_array_symbol(x)?x->type:x->type;}
-        case AST_UNARY:{const char*t=type_of(s,n->children[0],0);if(same(t,ERROR_TYPE))return t;if(same(n->text,"+")||same(n->text,"-")){if(numeric(t))return same(t,"char")?"int":t;diag(s,"SEM004",n->children[0],"","Operador '%s' exige operando numérico.",n->text);return ERROR_TYPE;}if(same(n->text,"!")){if(same(t,"bool"))return "bool";diag(s,"SEM004",n->children[0],"","O operador '!' exige operando bool.");return ERROR_TYPE;}return ERROR_TYPE;}
-        case AST_BINARY:{const char*l=type_of(s,n->children[0],0),*r=type_of(s,n->children[1],0);return binary_type(s,n->text,l,r,n);}
-        case AST_ASSIGN:{const char*t=lvalue_type(s,n->children[0]),*v=type_of(s,n->children[1],1);if(same(v,"void")){char*e=expr_text(n->children[1]);diag(s,"SEM012",(n->children[1]->kind==AST_CALL&&n->children[1]->count)?n->children[1]->children[0]:n->children[1],"","Função “%s” não produz valor (retorno void) e não pode ser usada como expressão de atribuição.",n->children[1]->kind==AST_CALL&&n->children[1]->children[0]->kind==AST_ID?n->children[1]->children[0]->text:"função");free(e);return ERROR_TYPE;}if(!same(t,ERROR_TYPE)&&!same(v,ERROR_TYPE)&&!compatible(v,t)){char*a=expr_text(n->children[0]),*b=expr_text(n->children[1]);diag(s,"SEM003",n->children[1],"","Não é possível atribuir %s a %s sem conversão permitida (destino “%s”; expressão “%s”).",v,t,a,b);free(a);free(b);return ERROR_TYPE;}return t;}
-        case AST_INDEX:{const char*it=type_of(s,n->children[1],0);if(!same(it,"int")&&!same(it,ERROR_TYPE)){char*v=expr_text(n->children[0]);diag(s,"SEM006",n->children[1],"","Índice do vetor “%s” deve ser int; recebeu %s (expressão “%s”).",v,it,expr_text(n->children[1]));free(v);}Symbol*x=NULL;if(n->children[0]->kind==AST_ID)x=lookup(s->current,n->children[0]->text);if(x&&!is_array_symbol(x))diag(s,"SEM006",n->children[0],x->name,"'%s' não é um vetor e não pode ser indexado.",x->name);int c;if(x&&x->has_size&&literal_int(n->children[1],&c)&&(c<0||c>=x->size))diag(s,"SEM006",n->children[1],"","Índice %d fora dos limites do vetor '%s'.",c,x->name);return x&&is_array_symbol(x)?x->type:ERROR_TYPE;}
-        case AST_CALL:{const char*t=check_call(s,n);if(same(t,"void")&&!allow_void){const AstNode*c=n->children[0];diag(s,"SEM012",c,"","Função “%s” não produz valor (retorno void) e não pode ser usada como expressão.",c->kind==AST_ID?c->text:"função");}return t;}
-        default:return ERROR_TYPE;
+static SemType sem_expression(SemContext *c,AstNode *n,int value);
+static SemType sem_expression_for(SemContext *c,AstNode *n,int value,const char *context);
+static void sem_assignable(SemContext *c,AstNode *n,SemType t) {
+    if(t.base==S_ERROR)return;
+    if((n->kind!=AST_ID&&n->kind!=AST_INDEX)||t.array){
+        char *text=sem_text(n);
+        if(n->kind==AST_LIT){
+            const char *category="string";
+            if(!strncmp(n->text,"int,",4))category="inteiro";
+            else if(!strncmp(n->text,"real,",5))category="real";
+            else if(!strncmp(n->text,"bool,",5))category="booleano";
+            else if(!strncmp(n->text,"char,",5))category="caractere";
+            sem_error(c,"SEM013",n,"Destino de atribuição não é atribuível; o literal %s “%s” não designa uma variável ou elemento de vetor.",category,text);
+        }else sem_error(c,"SEM013",n,"Destino de atribuição não é atribuível; a expressão “%s” não designa uma variável ou elemento de vetor.",text);
+        free(text);
     }
 }
-
-static const char *lvalue_type(Semantic*s,const AstNode*n){
-    if(!n)return ERROR_TYPE;
-    if(n->kind==AST_ID){Symbol*x=lookup(s->current,n->text);if(!x){diag(s,"SEM001",n,n->text,"Identificador “%s” não declarado neste escopo.",n->text);return ERROR_TYPE;}if(!same(x->category,"VARIAVEL")&&!same(x->category,"PARAMETRO")&&!same(x->category,"VETOR")){diag(s,"SEM003",n,x->name,"'%s' não é uma entidade atribuível.",x->name);return ERROR_TYPE;}return x->type;}
-    if(n->kind==AST_INDEX)return type_of(s,n,0);
-    if(n->kind==AST_LIT){const char*p=strchr(n->text,',');diag(s,"SEM013",n,p?p+1:"","Destino de atribuição não é atribuível; o literal inteiro “%s” não designa uma variável ou elemento de vetor.",p?p+1:n->text);return ERROR_TYPE;}
-    diag(s,"SEM013",n,"","Destino da atribuição não é atribuível.");return ERROR_TYPE;
-}
-
-static int check_block(Semantic*s,const AstNode*n,int create_scope){
-    Scope*old=s->current;if(create_scope)s->current=scope_new(old,"block");int returns=0;
-    for(size_t i=0;i<n->count;i++){const AstNode*x=n->children[i];if(x->kind==AST_VAR)check_var_decl(s,x);else {int r=check_statement(s,x);if(!returns)returns=r;}}
-    if (create_scope) s->current=old;
-    return returns;
-}
-
-static int check_statement(Semantic*s,const AstNode*n){
-    if(!n)return 0;
-    switch(n->kind){
-        case AST_BLOCK:return check_block(s,n,1);
-        case AST_EXPR_STMT:if(n->count)type_of(s,n->children[0],1);return 0;
-        case AST_IF:{const char*t=type_of(s,n->children[0],0);if(!same(t,"bool")&&!same(t,ERROR_TYPE)){char*e=expr_text(n->children[0]);diag(s,"SEM005",n->children[0],"","Condição de if deve ter tipo bool; recebeu %s (expressão “%s”).",t,e);free(e);}int a=check_statement(s,n->children[1]);int b=(n->count>2&&n->children[2]->kind!=AST_NULL)?check_statement(s,n->children[2]):0;return a&&b;}
-        case AST_WHILE:{const char*t=type_of(s,n->children[0],0);if(!same(t,"bool")&&!same(t,ERROR_TYPE)){char*e=expr_text(n->children[0]);diag(s,"SEM005",n->children[0],"","Condição de while deve ter tipo bool; recebeu %s (expressão “%s”).",t,e);free(e);}s->loop_depth++;check_statement(s,n->children[1]);s->loop_depth--;return 0;}
-        case AST_FOR:{if(n->count>0&&n->children[0]->kind!=AST_NULL)type_of(s,n->children[0],1);if(n->count>1&&n->children[1]->kind!=AST_NULL){const char*t=type_of(s,n->children[1],0);if(!same(t,"bool")&&!same(t,ERROR_TYPE))diag(s,"SEM005",n->children[1],"","A condição do for deve ser bool.");}if(n->count>2&&n->children[2]->kind!=AST_NULL)type_of(s,n->children[2],1);s->loop_depth++;check_statement(s,n->children[3]);s->loop_depth--;return 0;}
-        case AST_RETURN:{const char*expected=s->current_function?s->current_function->return_type:"void";if(n->count==0||n->children[0]->kind==AST_NULL){if(!same(expected,"void"))diag(s,"SEM009",n,"","Retorno sem valor em função que retorna %s.",expected);}else{const char*a=type_of(s,n->children[0],0);if(same(expected,"void"))diag(s,"SEM009",n->children[0],"","Função void não pode retornar um valor.");else if(!compatible(a,expected))diag(s,"SEM009",n->children[0],"","Retorno %s incompatível com o tipo %s da função “%s”; conversão implícita de float para int não permitida.",a,expected,s->current_function?s->current_function->name:"");}return 1;}
-        case AST_BREAK:case AST_CONTINUE:if(s->loop_depth==0)diag(s,"SEM010",n,"",same(n->kind==AST_BREAK?"break":"continue","break")?"break só pode ser usado dentro de um laço.":"continue só pode ser usado dentro de um laço.");return 0;
-        case AST_PRINT:if(n->count)type_of(s,n->children[0],0);return 0;
-        case AST_READ:if(n->count)lvalue_type(s,n->children[0]);return 0;
-        default:return 0;
+static void sem_condition(SemContext *c,AstNode *n,const char *kind) {
+    SemType actual=sem_expression(c,n,1);
+    if(actual.base!=S_ERROR&&(actual.base!=S_BOOL||actual.array)){
+        char *text=sem_text(n);
+        sem_error(c,"SEM005",n,"Condição de %s deve ter tipo bool; recebeu %s (expressão “%s”).",kind,sem_type_text(actual),text);free(text);
     }
 }
-
-static void check_function(Semantic*s,const AstNode*n){
-    char *ret=NULL,*name=NULL;split_type_name(n->text,&ret,&name);char *lp=strchr(name,'(');if(lp)*lp='\0';Symbol*fn=lookup_current(s->global,name);free(ret);if(!fn||!same(fn->category,"FUNCAO")){free(name);return;}
-    Scope*old=s->current;s->current=scope_new(old,"function");s->current_function=fn;
-    for(Param*p=fn->params;p;p=p->next){Symbol*x=new_symbol(p->name,p->is_array?"VETOR":"PARAMETRO",p->type,p->line,p->column,s->current->level);x->has_size=0;Symbol*dup=declare_symbol(s->current,x);if(dup)diag(s,"SEM002",n,p->name,"Parâmetro duplicado '%s'.",p->name);}
-    int returns=check_block(s,n->children[0],1);if(!same(fn->return_type,"void")&&!returns){diag(s,"SEM011",n,name,"A função “%s” pode terminar sem retornar %s; o corpo não garante um retorno.",fn->name,fn->return_type);}s->current=old;s->current_function=NULL;
+static SemType sem_assignment(SemContext *c,AstNode *n) {
+    int before=c->errors;
+    SemType target=sem_expression(c,n->children[0],1);
+    sem_assignable(c,n->children[0],target);
+    SemType actual=n->children[1]->kind==AST_ASSIGN?sem_assignment(c,n->children[1]):sem_expression_for(c,n->children[1],1,"atribuição");
+    char *target_text=sem_text(n->children[0]);
+    sem_assignment_conversion(c,n->children[1],target,actual,target_text);free(target_text);
+    int failed=c->errors>before||target.base==S_ERROR||actual.base==S_ERROR;
+    n->semantic_type=failed?"<error>":"void";
+    return failed?sem_type(S_ERROR,0):target;
 }
-
-int semantic_analyze(const AstNode *program, FILE *out, FILE *err){
-    if (!program || program->kind != AST_PROGRAM) return 0;
-    Semantic s; memset(&s,0,sizeof(s));s.out=out;s.err=err;s.global=scope_new(NULL,"global");s.current=s.global;
-    collect_globals(&s,program);
-    int entries=0;for(Symbol*x=s.global->symbols;x;x=x->next)if(same(x->category,"FUNCAO")&&(same(x->name,"main")||same(x->name,"principal")))entries++;
-    if(entries==0)diag(&s,"SEM011",program,"","O programa deve possuir uma função main() ou principal().");else if(entries>1)diag(&s,"SEM002",program,"","O programa deve possuir apenas uma função de entrada (main ou principal).");
-    for(size_t i=0;i<program->count;i++){const AstNode*n=program->children[i];if(n->kind==AST_FUNCTION)check_function(&s,n);else if(n->kind==AST_VAR){/* global initializer */ if(n->count>0&&n->children[0]){int z;const char*t=type_of(&s,n->children[0],0);if(!same(t,"int")&&!same(t,ERROR_TYPE))diag(&s,"SEM006",n->children[0],"","O tamanho do vetor deve ser inteiro.");if(literal_int(n->children[0],&z)&&z<=0)diag(&s,"SEM006",n->children[0],"","O tamanho do vetor deve ser maior que zero.");}if(n->count>1&&n->children[1]){char *ty=NULL,*nn=NULL;split_type_name(n->text,&ty,&nn);const char*a=type_of(&s,n->children[1],0);if(!compatible(a,norm(ty)))diag(&s,"SEM003",n->children[1],"","Não é possível atribuir %s a %s.",a,norm(ty));free(ty);free(nn);}}}
-    fprintf(out,"Análise semântica concluída: %d %s; programa %s.",s.diagnostics,s.diagnostics==1?"erro":"erros",s.diagnostics?"rejeitado":"aceito");
-    return s.diagnostics==0;
+static SemType sem_expression_inner(SemContext *c,AstNode *n) {
+    if(n->kind==AST_LIT){const char *comma=strchr(n->text,',');size_t len=comma?(size_t)(comma-n->text):strlen(n->text);char *type=xmalloc(len+1);memcpy(type,n->text,len);type[len]=0;SemType t=sem_named_type(type);free(type);return t;}
+    if(n->kind==AST_ID){
+        SemSymbol *s=sem_lookup(c,n->text);
+        sem_resolve(n,s);
+        if(!s){sem_error(c,"SEM001",n,"Identificador “%s” não declarado neste escopo.",n->text);return sem_type(S_ERROR,0);}
+        if(!strcmp(s->category,"function")){sem_error(c,"E_FUNCTION_VALUE",n,"A função '%s' deve ser chamada.",n->text);return sem_type(S_ERROR,0);}
+        return s->type;
+    }
+    if(n->kind==AST_CALL){
+        AstNode *callee=n->children[0];SemSymbol *s=callee->kind==AST_ID?sem_lookup(c,callee->text):NULL;
+        sem_resolve(callee,s);sem_resolve(n,s);
+        if(!s||strcmp(s->category,"function")){
+            if(callee->kind==AST_ID&&!s){
+                callee->semantic_type="<error>";
+                sem_error(c,"SEM001",callee,"Identificador “%s” não declarado neste escopo.",callee->text);
+            }else{
+                int invalid=0;
+                if(callee->kind==AST_ID)callee->semantic_type="<error>";
+                else invalid=sem_expression(c,callee,1).base==S_ERROR;
+                if(!invalid){char *text=sem_text(callee);sem_error(c,"E_CALL",callee,"'%s' não é uma função declarada.",text);free(text);}
+            }
+            for(size_t i=1;i<n->count;i++)sem_expression(c,n->children[i],1);
+            return sem_type(S_ERROR,0);
+        }
+        callee->semantic_type="function";
+        AstNode *fn=s->declaration;
+        if(n->count-1!=fn->parameter_count)sem_error(c,"SEM007",n,"“%s” espera %zu argumentos, mas recebeu %zu.",s->name,fn->parameter_count,n->count-1);
+        for(size_t i=1;i<n->count;i++) {
+            SemType actual=sem_expression(c,n->children[i],1);
+            if(i<=fn->parameter_count){
+                SemType expected=sem_decl_type(fn->parameters[i-1]);
+                if(!sem_compatible(expected,actual)){
+                    char *text=sem_text(n->children[i]);
+                    sem_error(c,"SEM008",n->children[i],"Argumento %zu de “%s”: esperado %s, recebido %s (expressão “%s”).",i,s->name,sem_type_text(expected),sem_type_text(actual),text);free(text);
+                }else sem_coercion(n->children[i],expected,actual);
+            }
+        }
+        return s->type;
+    }
+    if(n->kind==AST_INDEX){
+        SemType target=sem_expression(c,n->children[0],1),index=sem_expression(c,n->children[1],1);
+        if(index.base!=S_ERROR&&(index.base!=S_INT||index.array)){
+            char *target_text=sem_text(n->children[0]),*index_text=sem_text(n->children[1]);
+            sem_error(c,"SEM006",n->children[1],"Índice do vetor “%s” deve ser int; recebeu %s (expressão “%s”).",target_text,sem_type_text(index),index_text);free(target_text);free(index_text);
+        }
+        if(target.base==S_ERROR)return target;
+        if(!target.array){char *text=sem_text(n->children[0]);sem_error(c,"E_ARRAY",n->children[0],"A expressão '%s' não é um vetor.",text);free(text);return sem_type(S_ERROR,0);}
+        n->resolved_declaration=n->children[0]->resolved_declaration;
+        n->semantic_category=n->children[0]->semantic_category;
+        n->semantic_scope=n->children[0]->semantic_scope;
+        n->array_dimension=n->children[0]->array_dimension;
+        target.array=0;return target;
+    }
+    if(n->kind==AST_UNARY){
+        SemType operand=sem_expression(c,n->children[0],1);if(operand.base==S_ERROR)return operand;
+        int logical=!strcmp(n->text,"!");
+        if((logical&&(operand.base!=S_BOOL||operand.array))||(!logical&&!sem_numeric(operand))){sem_error(c,"E_OPERATOR",n,"O operador '%s' exige operando %s.",n->text,logical?"bool":"numérico");return sem_type(S_ERROR,0);}
+        return logical?sem_type(S_BOOL,0):operand;
+    }
+    if(n->kind==AST_BINARY){
+        SemType left=sem_expression(c,n->children[0],1),right=sem_expression(c,n->children[1],1);
+        if(left.base==S_ERROR||right.base==S_ERROR)return sem_type(S_ERROR,0);
+        const char *op=n->text;int numeric=sem_numeric(left)&&sem_numeric(right),valid;
+        int logical=!strcmp(op,"&&")||!strcmp(op,"||"),equality=!strcmp(op,"==")||!strcmp(op,"!=");
+        int relation=!strcmp(op,"<")||!strcmp(op,"<=")||!strcmp(op,">")||!strcmp(op,">=");
+        if(logical)valid=!left.array&&!right.array&&left.base==S_BOOL&&right.base==S_BOOL;
+        else if(equality)valid=numeric||(!left.array&&!right.array&&left.base==right.base&&(left.base==S_BOOL||left.base==S_CHAR));
+        else if(!strcmp(op,"%"))valid=!left.array&&!right.array&&left.base==S_INT&&right.base==S_INT;
+        else valid=numeric;
+        if(!valid){sem_error(c,"E_OPERATOR",n,"O operador '%s' não aceita os tipos '%s' e '%s'.",op,sem_type_text(left),sem_type_text(right));return sem_type(S_ERROR,0);}
+        if(numeric&&(left.base==S_FLOAT||right.base==S_FLOAT)){
+            sem_coercion(n->children[0],sem_type(S_FLOAT,0),left);
+            sem_coercion(n->children[1],sem_type(S_FLOAT,0),right);
+        }
+        if(logical||equality||relation)return sem_type(S_BOOL,0);
+        return sem_type(left.base==S_FLOAT||right.base==S_FLOAT?S_FLOAT:S_INT,0);
+    }
+    return sem_type(S_ERROR,0);
+}
+static SemType sem_expression_for(SemContext *c,AstNode *n,int value,const char *context) {
+    int before=c->errors;
+    SemType result=n->kind==AST_ASSIGN?sem_assignment(c,n):sem_expression_inner(c,n);
+    if(result.base==S_ERROR||c->errors>before)result=sem_type(S_ERROR,0);
+    else if(n->kind==AST_ASSIGN){
+        result=sem_type(S_VOID,0);
+        if(value){
+            char *text=sem_text(n);
+            sem_error(c,"SEM003",n,"A atribuição “%s” é um comando sem valor e não pode ser usada como expressão.",text);free(text);
+            result=sem_type(S_ERROR,0);
+        }
+    }else if(result.base==S_VOID&&value){
+        if(n->kind==AST_CALL&&n->children[0]->kind==AST_ID)
+            sem_error(c,"SEM012",n,"Função “%s” não produz valor (retorno void) e não pode ser usada como expressão de %s.",n->children[0]->text,context);
+        else {char *text=sem_text(n);sem_error(c,"SEM012",n,"A expressão “%s” de tipo void não pode ser usada como valor.",text);free(text);}
+        result=sem_type(S_ERROR,0);
+    }
+    n->semantic_type=sem_type_text(result);
+    return result;
+}
+static SemType sem_expression(SemContext *c,AstNode *n,int value) {
+    return sem_expression_for(c,n,value,"valor");
+}
+static int sem_statement(SemContext *c,AstNode *n);
+static int sem_block(SemContext *c,AstNode *n,int new_scope) {
+    if(new_scope)sem_push(c);
+    int flow=FLOW_NEXT;
+    for(size_t i=0;i<n->count;i++){int result=sem_statement(c,n->children[i]);if(flow&FLOW_NEXT)flow=(flow&~FLOW_NEXT)|result;}
+    if(new_scope)sem_pop(c);
+    return flow;
+}
+static int sem_statement(SemContext *c,AstNode *n) {
+    if(!n||n->kind==AST_NULL)return FLOW_NEXT;
+    if(n->kind==AST_BLOCK)return sem_block(c,n,1);
+    if(n->kind==AST_VAR){
+        SemType t=sem_decl_type(n);sem_declare(c,n,t.array?"array":"variable");
+        if(n->children[0])sem_conversion(c,n->children[0],sem_type(S_INT,0),sem_expression(c,n->children[0],1));
+        if(n->children[1]){char *target=sem_decl_name(n);sem_assignment_conversion(c,n->children[1],t,sem_expression_for(c,n->children[1],1,"atribuição"),target);free(target);}
+    }else if(n->kind==AST_EXPR_STMT){if(n->children[0]->kind!=AST_NULL)sem_expression(c,n->children[0],0);
+    }else if(n->kind==AST_IF){
+        sem_condition(c,n->children[0],"if");
+        int a=sem_statement(c,n->children[1]);int b=sem_statement(c,n->children[2]);return a|b;
+    }else if(n->kind==AST_WHILE||n->kind==AST_FOR){
+        size_t cond=n->kind==AST_FOR?1:0,body=n->kind==AST_FOR?3:1;
+        if(n->kind==AST_FOR&&n->children[0]->kind!=AST_NULL)sem_expression(c,n->children[0],0);
+        if(n->children[cond]->kind!=AST_NULL)sem_condition(c,n->children[cond],n->kind==AST_FOR?"for":"while");
+        if(n->kind==AST_FOR&&n->children[2]->kind!=AST_NULL)sem_expression(c,n->children[2],0);
+        c->loop_depth++;int flow=sem_statement(c,n->children[body]);c->loop_depth--;return FLOW_NEXT|(flow&FLOW_RETURN);
+    }else if(n->kind==AST_RETURN){
+        AstNode *value=n->children[0];SemType actual=value->kind==AST_NULL?sem_type(S_VOID,0):sem_expression(c,value,1);
+        if(!c->function)sem_error(c,"SEM010",n,"Retorno fora de uma função.");
+        else {
+            SemType expected=sem_decl_type(c->function);
+            if(!sem_compatible(expected,actual)){
+                char *name=sem_decl_name(c->function);
+                sem_error(c,"SEM009",value->kind==AST_NULL?n:value,"Retorno %s incompatível com o tipo %s da função “%s”%s",sem_type_text(actual),sem_type_text(expected),name,
+                    !actual.array&&!expected.array&&actual.base==S_FLOAT&&expected.base==S_INT?"; conversão implícita de float para int não permitida.":".");free(name);
+            }else if(value->kind!=AST_NULL)sem_coercion(value,expected,actual);
+        }
+        return FLOW_RETURN;
+    }else if(n->kind==AST_BREAK||n->kind==AST_CONTINUE){
+        if(!c->loop_depth)sem_error(c,"SEM010",n,"%s só pode ocorrer dentro de laço.",n->kind==AST_BREAK?"break":"continue");
+        return n->kind==AST_BREAK?FLOW_BREAK:FLOW_CONTINUE;
+    }else if(n->kind==AST_PRINT)sem_expression(c,n->children[0],1);
+    else if(n->kind==AST_READ)sem_assignable(c,n->children[0],sem_expression(c,n->children[0],1));
+    return FLOW_NEXT;
+}
+static void sem_reset_annotations(AstNode *n) {
+    if(!n)return;
+    n->semantic_type=n->coercion_type=n->chain_coercion_type=n->semantic_category=NULL;
+    n->semantic_scope=-1;n->resolved_declaration=n->array_dimension=NULL;
+    for(size_t i=0;i<n->count;i++)sem_reset_annotations(n->children[i]);
+    for(size_t i=0;i<n->parameter_count;i++)sem_reset_annotations(n->parameters[i]);
+}
+int semantic_analyze(AstNode *program,FILE *diagnostics) {
+    sem_reset_annotations(program);
+    SemContext c={NULL,0,0,0,NULL,diagnostics,NULL};sem_push(&c);
+    for(size_t i=0;i<program->count;i++)if(program->children[i]->kind==AST_FUNCTION)sem_declare(&c,program->children[i],"function");
+    for(size_t i=0;i<program->count;i++)if(program->children[i]->kind!=AST_FUNCTION)sem_statement(&c,program->children[i]);
+    for(size_t i=0;i<program->count;i++){
+        AstNode *n=program->children[i];if(n->kind!=AST_FUNCTION)continue;
+        c.function=n;sem_push(&c);
+        for(size_t j=0;j<n->parameter_count;j++)sem_declare(&c,n->parameters[j],"parameter");
+        int flow=sem_block(&c,n->children[0],0);
+        if(sem_decl_type(n).base!=S_VOID&&(flow&FLOW_NEXT)){
+            char *name=sem_decl_name(n);
+            AstNode origin=*n;origin.line=n->declaration_line;origin.column=n->declaration_column;
+            AstNode *body=n->children[0],*last=body->count?body->children[body->count-1]:NULL;
+            if(last&&last->kind==AST_IF&&last->children[2]->kind==AST_NULL){
+                char *condition=sem_text(last->children[0]);
+                sem_error(&c,"SEM011",&origin,"A função “%s” pode terminar sem retornar %s; o ramo em que “%s” é falso alcança o fim do corpo.",name,sem_type_text(sem_decl_type(n)),condition);free(condition);
+            }else sem_error(&c,"SEM011",&origin,"A função “%s” pode terminar sem retornar %s; há um caminho que alcança o fim do corpo.",name,sem_type_text(sem_decl_type(n)));
+            free(name);
+        }
+        sem_pop(&c);c.function=NULL;
+    }
+    sem_pop(&c);
+    if(c.errors>1)qsort(c.diagnostics,(size_t)c.errors,sizeof(*c.diagnostics),sem_diagnostic_order);
+    for(int i=0;i<c.errors;i++){fputs(c.diagnostics[i].text,c.out);fputs("\r\n",c.out);free(c.diagnostics[i].text);}
+    free(c.diagnostics);return c.errors;
 }

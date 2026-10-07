@@ -63,6 +63,10 @@ except ModuleNotFoundError as exc:
 # ======================================================================
 
 def executar_terminal(argumentos: list[str]) -> int:
+    if "--semantic" in argumentos:
+        from ProjetoMiniC.src.semantic.__main__ import executar_cli
+        semantic_args = [arg for arg in argumentos if arg != "--semantic"]
+        return executar_cli(semantic_args)
     caminho_alvo: str | None = None
     mostrar_tokens = False
     mostrar_erros = False
@@ -70,8 +74,6 @@ def executar_terminal(argumentos: list[str]) -> int:
     mostrar_ast = False
     apenas_parse = False
     formato_sexp = False
-    verificar_semantica = False
-    mostrar_simbolos = False
 
     for arg in argumentos:
         if arg == "--tokens":
@@ -86,15 +88,11 @@ def executar_terminal(argumentos: list[str]) -> int:
             apenas_parse = True
         elif arg == "--sexp":
             formato_sexp = True
-        elif arg in ("--semantic", "--check"):
-            verificar_semantica = True
-        elif arg == "--symbols":
-            mostrar_simbolos = True
         elif not arg.startswith("--") and caminho_alvo is None:
             caminho_alvo = arg
 
     if not caminho_alvo:
-        print("Uso: python main.py <arquivo.minic> [--tokens] [--errors] [--jsonl] [--parse] [--ast] [--sexp] [--semantic|--check] [--symbols]",
+        print("Uso: python main.py <arquivo.minic> [--tokens] [--errors] [--jsonl] [--parse] [--ast] [--sexp]",
               file=sys.stderr)
         return 1
 
@@ -111,41 +109,6 @@ def executar_terminal(argumentos: list[str]) -> int:
 
     scanner = Scanner(conteudo)
     scanner.scan_tokens()
-
-    # ------------------------------------------------------------------
-    # Etapa 3: análise semântica sobre a AST
-    # ------------------------------------------------------------------
-    if verificar_semantica:
-        parser = Parser(scanner.tokens)
-        programa = parser.parse()
-        if scanner.possui_erros():
-            for err in scanner.erros:
-                print(f"[ERRO LÉXICO] {err.diagnostico()}", file=sys.stderr)
-            return 2
-        if parser.errors or programa is None:
-            for err in parser.errors:
-                print(f"[ERRO SINTÁTICO] {err}", file=sys.stderr)
-            return 3
-        from ProjetoMiniC.src.semantic import SemanticAnalyzer
-        resultado = SemanticAnalyzer().analyze(programa)
-        if mostrar_ast:
-            print(print_tree(programa))
-        if mostrar_simbolos:
-            print("Tabela de símbolos:")
-            for simbolo in resultado.global_scope.symbols.values():
-                print(f"  {simbolo.name}: {simbolo.category} {simbolo.type_display()} (linha {simbolo.line}, coluna {simbolo.column})")
-        if resultado.success:
-            print("Análise semântica concluída: 0 erros; programa aceito.")
-            return 0
-        for diagnostico in resultado.diagnostics:
-            print(f"[ERRO SEMÂNTICO] {diagnostico}", file=sys.stderr)
-        quantidade = len(resultado.diagnostics)
-        substantivo = "erro" if quantidade == 1 else "erros"
-        print(
-            f"Análise semântica concluída: {quantidade} {substantivo}; programa rejeitado.",
-            file=sys.stderr,
-        )
-        return 4
 
     # ------------------------------------------------------------------
     # Etapa 2: Parser + AST (não substitui os modos do lexer já existentes)

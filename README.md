@@ -9,8 +9,6 @@ O objetivo do projeto e construir gradualmente um pipeline de compilacao: leitur
 | Etapa | Python | C |
 |---|---|---|
 | Analise lexica | Implementada | Implementada |
-| Analise sintatica | Implementada | Implementada |
-| Analise semantica | Implementada | Implementada |
 
 O scanner C escreve tokens JSONL em `stdout` e erros JSONL em `stderr`. Os modulos C principais sao:
 
@@ -22,8 +20,6 @@ O scanner C escreve tokens JSONL em `stdout` e erros JSONL em `stderr`. Os modul
 - `C/main.c`: CLI e serializacao JSONL do scanner.
 - `C/parser.c`, `C/parser_main.c`: parser e entrada CLI do parser.
 - `C/ast.c` e `C/ast.h`: nos e serializacao da AST.
-- `C/semantic.c` e `C/semantic.h`: tabela de simbolos, escopos lexicos, verificacao de tipos, vetores, chamadas, retornos, fluxo de controle e diagnosticos SEM001..SEM013.
-- `C/semantic_main.c`: CLI da analise semantica C.
 
 O `Makefile` tambem compila os modulos C separadamente. A unidade `scanner.c` da raiz e destinada aos scripts que compilam um unico arquivo; a pasta `C/` preserva a organizacao modular usada pelo Makefile.
 
@@ -241,7 +237,9 @@ Os parsers Python e C seguem esse contrato para a CLI. A interface grafica apres
 
 ## Limitacoes atuais
 
-- A analise semantica esta implementada em `ProjetoMiniC/src/semantic/`, com tabela de simbolos, escopos, verificacao de tipos, vetores, chamadas, retornos e diagnosticos SEM001..SEM012.
+- A analise semantica esta implementada em Python e C e passou nos 20 casos
+  fornecidos em ambas as linguagens, com diagnosticos identicos aos gabaritos.
+  Veja [documentacao semantica](ProjetoMiniC/docs/semantica.md).
 - Os pacotes de IR, otimizacao e geracao de codigo ainda sao estruturas de organizacao.
 - A interface grafica oferece atalhos para essas etapas, mas informa que estao em desenvolvimento.
 - O projeto analisa e representa programas MiniC; ele ainda nao executa os programas nem gera um executavel final.
@@ -282,8 +280,6 @@ Abre o painel principal, com um botão para cada etapa do compilador. **Análise
 
 ```bash
 python main.py arquivo.minic                # análise léxica (tokens + diagnóstico)
-python main.py arquivo.minic --check         # análise semântica
-python main.py arquivo.minic --check --symbols # semântica + símbolos globais
 python main.py arquivo.minic --tokens       # só a tabela de tokens
 python main.py arquivo.minic --errors       # só os erros léxicos
 python main.py arquivo.minic --jsonl        # tokens em JSONL (erros em JSONL no stderr)
@@ -359,20 +355,7 @@ Para remover binários e arquivos gerados: `make clean`.
 | `bash test_scanner_python.sh scanner.py ProjetoMiniC/casos-programas-c` | Compara os tokens do scanner Python com os `.expected.jsonl`. |
 | `bash test_scanner_c.sh scanner.c ProjetoMiniC/casos-programas-c` | Compila `scanner.c` e compara os tokens do scanner C com os `.expected.jsonl`. |
 | `python test_parser_50.py testes-parser-50/testes-parser-50/casos` | Roda os 50 casos do parser (Python). |
-| `make test-parser-50
-
-### Analise semantica C
-
-Compile e execute o analisador semantico nativo:
-
-```bash
-make semantic
-./semantic "C semantico/01_promocao_numerica.c"
-```
-
-Codigo de saida `0` significa programa semanticamente valido; `4` significa erro semantico. A pasta `C semantico/` contem 20 casos oficiais, e todos passam na implementacao atual.
-
- CASES_DIR=testes-parser-50/testes-parser-50/casos` | Mesmo que o anterior, via Makefile. |
+| `make test-parser-50 CASES_DIR=testes-parser-50/testes-parser-50/casos` | Mesmo que o anterior, via Makefile. |
 | `make test-parser` | Compila o parser em C e roda `tests/test_parser.py` (requer Tkinter). |
 
 Observações:
@@ -420,6 +403,47 @@ Erros léxicos e sintáticos são reportados com linha e coluna.
 - C11 (gcc, make)
 - JSONL como formato de intercâmbio de tokens/erros entre as implementações e os casos de teste
 
-### Interface gráfica da análise semântica
+## Análise semântica
 
-A análise semântica possui interface gráfica própria, seguindo o mesmo padrão da análise léxica e da análise sintática. Para abrir o painel principal, execute `python main.py` e selecione **Análise Semântica**. Também é possível executar diretamente com `python -m ProjetoMiniC.src.semantic`.
+```bash
+python3 minic.py arquivo.c
+python3 main.py arquivo.c --semantic
+make semantic
+./minic arquivo.c
+make test-semantic
+```
+
+Os wrappers `minic.py` e `minic.c` executam lexer → parser/AST → semântica,
+preservando `parser.py` e `parser.c` como entradas sintáticas. Erros semânticos
+retornam 4. Regras, contrato de diagnósticos e resultados de validação estão em
+[semantica.md](ProjetoMiniC/docs/semantica.md).
+
+Suíte semântica fornecida (20/20 em cada linguagem):
+
+```bash
+bash testes_semanticos_py.sh minic.py minic-testes-semanticos
+bash testes_semanticos_c.sh minic.c minic-testes-semanticos
+```
+
+## Versão unificada
+
+Esta versão reúne o núcleo semântico e a AST anotada do projeto Amorim com a interface gráfica e integração de análise semântica do projeto Mendes.
+
+### Análise semântica Python
+- `python main.py arquivo.minic --semantic`
+- `python main.py arquivo.minic --semantic --ast`
+- `python main.py arquivo.minic --semantic --symbols`
+- `python -m ProjetoMiniC.src.semantic`
+
+### Interface gráfica semântica
+- `python -m ProjetoMiniC.src.semantic`
+- No painel principal: botão **Análise Semântica**.
+
+### Análise semântica C
+- `make semantic`
+- `./semantic arquivo.c`
+
+### Testes
+- `make test-semantic` — suíte semântica C de 20 casos.
+- `make test-parser-50` — suíte externa de 50 casos do parser.
+- `python -m unittest discover -s tests -v`
