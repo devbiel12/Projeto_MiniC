@@ -1,45 +1,35 @@
-#include <stdlib.h>
 #include <stdio.h>
-#include <string.h>
+#include <stdlib.h>
 #include "token.h"
 #include "util.h"
 
 Token token_create(TokenType type, const char *lexeme, int line, int column, const char *attr) {
-    Token tok;
-    tok.type = type;
-    tok.lexeme = xstrdup(lexeme ? lexeme : "");
-    tok.line = line;
-    tok.column = column;
-    tok.attribute = attr ? xstrdup(attr) : NULL;
-    return tok;
+    Token token = {type, xstrdup(lexeme ? lexeme : ""), line, column, xstrdup(attr)};
+    return token;
 }
 
 void token_set_attr_int(Token *tok, long value) {
-    char buf[64];
-    snprintf(buf, sizeof(buf), "%ld", value);
-    if (tok->attribute) free(tok->attribute);
-    tok->attribute = xstrdup(buf);
+    char buffer[32];
+    snprintf(buffer, sizeof(buffer), "%ld", value);
+    free(tok->attribute);
+    tok->attribute = xstrdup(buffer);
 }
 
 void token_set_attr_float(Token *tok, double value) {
-    char buf[64];
-    snprintf(buf, sizeof(buf), "%g", value);
-    if (tok->attribute) free(tok->attribute);
-    tok->attribute = xstrdup(buf);
+    char buffer[64];
+    snprintf(buffer, sizeof(buffer), "%.17g", value);
+    free(tok->attribute);
+    tok->attribute = xstrdup(buffer);
 }
 
 void token_set_attr_string(Token *tok, const char *value) {
-    if (tok->attribute) free(tok->attribute);
-    tok->attribute = value ? xstrdup(value) : NULL;
+    free(tok->attribute);
+    tok->attribute = xstrdup(value);
 }
 
 void token_free(Token *tok) {
-    if (tok->lexeme) {
-        free(tok->lexeme);
-        tok->lexeme = NULL;
-    }
-    if (tok->attribute) {
-        free(tok->attribute);
-        tok->attribute = NULL;
-    }
+    free(tok->lexeme);
+    free(tok->attribute);
+    tok->lexeme = NULL;
+    tok->attribute = NULL;
 }
