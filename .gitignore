@@ -1,0 +1,28 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C build artifacts
+*.o
+*.exe
+*.out
+*.obj
+*.a
+*.so
+*.dll
+
+# Temporary and test outputs
+*.out.jsonl
+*.err.jsonl
+saida-*.txt
+diff-*.txt
+test_out.txt
+
+# Editor and OS
+.vscode/
+.idea/
+*.swp
+*.swo
+Thumbs.db
+

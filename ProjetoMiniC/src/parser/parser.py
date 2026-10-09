@@ -464,10 +464,8 @@ class Parser:
         if self._checar(TokenType.ASSIGN):
             igual = self._avancar()
             valor = self._atribuicao()
-            if isinstance(expr, (no.Identifier, no.ArrayAccess)):
-                return no.Assignment(linha=igual.linha, coluna=igual.coluna,
-                                      alvo=expr, valor=valor)
-            raise self._erro(igual, "alvo de atribuição inválido (esperado identificador ou vetor)")
+            return no.Assignment(linha=expr.linha, coluna=expr.coluna,
+                                 alvo=expr, valor=valor)
 
         return expr
 
@@ -477,7 +475,7 @@ class Parser:
         while self._checar(TokenType.OR):
             op = self._avancar()
             direita = self._expressao_and()
-            esquerda = no.BinaryOp(linha=op.linha, coluna=op.coluna,
+            esquerda = no.BinaryOp(linha=esquerda.linha, coluna=esquerda.coluna,
                                     operador="||", esquerda=esquerda, direita=direita)
         return esquerda
 
@@ -487,7 +485,7 @@ class Parser:
         while self._checar(TokenType.AND):
             op = self._avancar()
             direita = self._expressao_igualdade()
-            esquerda = no.BinaryOp(linha=op.linha, coluna=op.coluna,
+            esquerda = no.BinaryOp(linha=esquerda.linha, coluna=esquerda.coluna,
                                     operador="&&", esquerda=esquerda, direita=direita)
         return esquerda
 
@@ -497,7 +495,7 @@ class Parser:
         while self._checar(TokenType.EQ) or self._checar(TokenType.NEQ):
             op = self._avancar()
             direita = self._expressao_relacional()
-            esquerda = no.BinaryOp(linha=op.linha, coluna=op.coluna,
+            esquerda = no.BinaryOp(linha=esquerda.linha, coluna=esquerda.coluna,
                                     operador=op.lexema, esquerda=esquerda, direita=direita)
         return esquerda
 
@@ -507,7 +505,7 @@ class Parser:
         while self._olhar().tipo in _OPERADORES_RELACIONAIS:
             op = self._avancar()
             direita = self._expressao_aditiva()
-            esquerda = no.BinaryOp(linha=op.linha, coluna=op.coluna,
+            esquerda = no.BinaryOp(linha=esquerda.linha, coluna=esquerda.coluna,
                                     operador=op.lexema, esquerda=esquerda, direita=direita)
         return esquerda
 
@@ -517,7 +515,7 @@ class Parser:
         while self._olhar().tipo in _OPERADORES_ADITIVOS:
             op = self._avancar()
             direita = self._expressao_multiplicativa()
-            esquerda = no.BinaryOp(linha=op.linha, coluna=op.coluna,
+            esquerda = no.BinaryOp(linha=esquerda.linha, coluna=esquerda.coluna,
                                     operador=op.lexema, esquerda=esquerda, direita=direita)
         return esquerda
 
@@ -527,7 +525,7 @@ class Parser:
         while self._olhar().tipo in _OPERADORES_MULTIPLICATIVOS:
             op = self._avancar()
             direita = self._expressao_unaria()
-            esquerda = no.BinaryOp(linha=op.linha, coluna=op.coluna,
+            esquerda = no.BinaryOp(linha=esquerda.linha, coluna=esquerda.coluna,
                                     operador=op.lexema, esquerda=esquerda, direita=direita)
         return esquerda
 
@@ -566,7 +564,7 @@ class Parser:
                     while self._combinar(TokenType.COMMA):
                         argumentos.append(self._expressao())
                 self._consumir(TokenType.RPAREN, "esperado ')' após os argumentos da chamada")
-                expr = no.CallExpr(linha=parenteses.linha, coluna=parenteses.coluna,
+                expr = no.CallExpr(linha=expr.linha, coluna=expr.coluna,
                                     nome_funcao=expr.nome, argumentos=argumentos)
             else:
                 break

@@ -1,131 +1,193 @@
 # Projeto MiniC
 
-Compilador para a linguagem **MiniC** (um subconjunto de C), desenvolvido em duas implementações paralelas:
+Compilador para a linguagem **MiniC** (um subconjunto didático e estrito da linguagem C), desenvolvido com duas implementações complementares:
 
-- **Python** — implementação principal, em `ProjetoMiniC/src`
-- **C** — implementação do analisador léxico, em `C/`
+- **Python** — implementação principal completa de todo o frontend em [`ProjetoMiniC/src`](file:///c:/Users/guilherme.lima/OneDrive%20-%20Alpargatas%20S.A/Documentos/Projeto_MiniC/ProjetoMiniC/src), incluindo analisador léxico, sintático (com árvore AST), semântico e interfaces visuais (Tkinter).
+- **C** — implementação em C11 do analisador léxico em [`C/`](file:///c:/Users/guilherme.lima/OneDrive%20-%20Alpargatas%20S.A/Documentos/Projeto_MiniC/C) e executor canônico de testes semânticos em [`minic.c`](file:///c:/Users/guilherme.lima/OneDrive%20-%20Alpargatas%20S.A/Documentos/Projeto_MiniC/minic.c).
 
-O objetivo é construir, em etapas, um pipeline de compilação completo: análise léxica, análise sintática, análise semântica, geração de código intermediário, otimização e geração de código final.
+O objetivo do projeto é construir o pipeline completo de compilação: análise léxica, sintática, semântica, geração de código intermediário (IR), otimização e geração de código final.
 
-## Estado atual
+---
 
-| Etapa | Python | C |
-|---|---|---|
-| Análise léxica | ✅ Implementada | ✅ Implementada |
-| Análise sintática | 🚧 Estrutura criada (`src/parser`), ainda não implementada | — |
-| Análise semântica | 🚧 Estrutura criada (`src/semantic`), ainda não implementada | — |
-| AST | 🚧 Estrutura criada (`src/ast`) | — |
-| Geração de código / IR / otimização | 🚧 Estruturas criadas (`src/codegen`, `src/ir`, `src/optimizer`) | — |
+## Estado Atual do Compilador
 
-O lexer é o módulo mais maduro do projeto e serve de referência para os demais.
+| Etapa | Python | C | Status / Detalhes |
+|---|:---:|:---:|---|
+| **Análise Léxica (Scanner)** | ✅ 100% Funcional | ✅ 100% Funcional | Tabela de tokens, atributos, diagnósticos com linha/coluna exatos e exportação JSONL. Suporta GUI e CLI. |
+| **Análise Sintática (Parser)** | ✅ 100% Funcional | — | Descida recursiva cobrindo a gramática EBNF de MiniC, recuperação em modo pânico e construção de AST completa. |
+| **Árvore Sintática (AST)** | ✅ 100% Funcional | — | Hierarquia de classes de nós (`NoAST`), visualizador em árvore indentada e representação S-Expression (`--sexp`). |
+| **Análise Semântica (Aula 15)** | ✅ 100% Funcional | ✅ 100% Funcional | Tabela de símbolos hierárquica, escopos aninhados, tipagem estática, aridade, fluxo de controle e diagnósticos canônicos (`SEM001`–`SEM013`). **20/20 testes aprovados**. |
+| **Interface Visual (GUI)** | ✅ 100% Funcional | — | Painel Launcher central (`main.py`) e telas dedicadas com editor e visualizador para Léxico, Sintático e Semântico. |
+| **IR / Otimização / Codegen** | 🚧 Estrutura base | — | Estruturas e módulos preparados em `src/ir`, `src/optimizer` e `src/codegen` para as próximas fases. |
 
-## Estrutura do repositório
+---
+
+## Estrutura do Repositório
 
 ```text
 Projeto_MiniC/
-├── main.py                      # Ponto de entrada raiz (CLI + GUI) da versão Python
-├── scanner.py                   # Ponto de entrada alternativo, com resolução automática de path
-├── Makefile                     # Build da versão em C (deve ser executado a partir de C/)
-├── C/                            # Implementação do lexer em C
+├── main.py                      # Launcher unificado (GUI Tkinter) e ponto de entrada CLI
+├── minic.py                     # Driver CLI da Análise Semântica em Python (compatível com testes oficiais)
+├── minic.c                      # Driver da Análise Semântica em C (compilação GCC / testes oficiais)
+├── scanner.py                   # Ponto de entrada de conveniência do Scanner léxico
+├── testes_semanticos_py.sh      # Script Bash de validação da Análise Semântica (Python)
+├── testes_semanticos_c.sh       # Script Bash de validação da Análise Semântica (C)
+├── Makefile                     # Build do scanner em C
+├── C/                           # Implementação do scanner léxico em C
 │   ├── main.c
 │   ├── scanner.c / scanner.h
 │   ├── token.c / token.h
 │   ├── token_types.c / token_types.h
 │   ├── errors.c / errors.h
 │   └── util.c / util.h
-└── ProjetoMiniC/                # Implementação em Python + recursos do projeto
-    ├── docs/                     # Especificação, gramática (EBNF) e notas de arquitetura
-    ├── casos-programas-c/        # Programas .c válidos usados como casos de teste
-    ├── casos-invalidos/          # Casos .minic com erros léxicos propositais
+└── ProjetoMiniC/                # Implementação completa do frontend em Python
+    ├── docs/                    # Especificação, gramática EBNF e notas da disciplina
+    ├── casos-programas-c/       # Casos de teste válidos para análise léxica
+    ├── casos-invalidos/         # Casos de teste com erros léxicos
     └── src/
-        ├── lexer/                # Análise léxica (scanner, tokens, erros, JSONL, GUI)
-        ├── parser/                # (em construção)
-        ├── semantic/              # (em construção)
-        ├── ast/                   # (em construção)
-        ├── codegen/                # (em construção)
-        ├── ir/                     # (em construção)
-        └── optimizer/               # (em construção)
+        ├── lexer/               # Scanner, tokens, categorias léxicas e GUI (`__main__.py`)
+        ├── parser/              # Parser descendente recursivo e GUI (`__main__.py`)
+        ├── ast/                 # Nós da AST (`nodes.py`) e formatadores (`printer.py`)
+        ├── semantic/            # Analisador Semântico (`analyzer.py`) e GUI (`__main__.py`)
+        ├── ir/                  # Representação intermediária (em desenvolvimento)
+        ├── optimizer/           # Otimizador de código intermediário (em desenvolvimento)
+        └── codegen/             # Gerador de código-alvo (em desenvolvimento)
 ```
 
-## Executando a versão em Python
+---
 
-Requer Python 3.10+ (o projeto usa `from __future__ import annotations`) e Tkinter instalado para a interface gráfica.
+## Análise Semântica (Aula 15)
 
-A partir da raiz do repositório:
+O analisador semântico valida todas as restrições de contexto estático da linguagem MiniC após a geração da AST.
 
+### Diagnósticos Canônicos Suportados
+
+| Código | Descrição da Regra Semântica | Exemplo de Ocorrência |
+|---|---|---|
+| **SEM001** | Identificador não declarado no escopo visível | Uso de variável ou função sem declaração prévia |
+| **SEM002** | Redeclaração de identificador no mesmo escopo | Declarar `int x;` duas vezes no mesmo bloco |
+| **SEM003** | Incompatibilidade de tipos ou estreitamento implícito | Atribuir `float` a `int` (estreitamento proibido) |
+| **SEM005** | Condição de controle de fluxo não booleana | Expressão em `if`, `while` ou `for` que não resulta em `bool` |
+| **SEM006** | Índice de vetor não inteiro | Acessar `v[2.5]` ou com expressão de tipo não-`int` |
+| **SEM007** | Aridade incorreta em chamada de função | Chamar função com mais ou menos argumentos que o esperado |
+| **SEM008** | Incompatibilidade de tipo em argumento de função | Passar `float` para parâmetro `int` em função |
+| **SEM009** | Tipo de retorno incompatível com a assinatura | Retornar `float` em função com retorno `int` |
+| **SEM010** | Comando `break` ou `continue` fora de laço | Uso solto dentro de funções ou apenas dentro de `if` |
+| **SEM011** | Caminho de execução sem `return` em função não-void | Função não-`void` cujos fluxos não garantem retorno |
+| **SEM012** | Uso de função `void` como expressão de valor | Atribuir `n = funcao_void();` |
+| **SEM013** | Destino de atribuição não atribuível (violação de L-Value) | Atribuição inválida como `3 = n;` ou literais à esquerda |
+
+### Validação dos Testes Oficiais (100% de Aprovação)
+
+A suíte oficial do professor é composta por **20 casos de teste**:
+- **10 Casos Aceitos (Válidos):** `01` a `10` (testando promoção implícita `int` → `float`, sombreamento léxico de variáveis locais/globais, curto-circuito lógico, vetores e parâmetros array, recursão mútua, comandos `void`, múltiplos ramos com `return`, etc.).
+- **10 Casos Rejeitados (Inválidos):** `11` a `20` (testando emissão precisa dos erros semânticos canônicos `SEM001` a `SEM013`).
+
+#### Execução dos Testes em Python
+
+```bash
+# Executar a bateria oficial de testes semânticos:
+./testes_semanticos_py.sh minic.py "/caminho/para/pasta_testes"
+
+# Resultado obtido:
+# [OK] 01_promocao_numerica.c
+# ...
+# [OK] 20_destino_nao_atribuivel.c
+# Resultado: 20/20 aprovados; 0 reprovados.
+```
+
+Execução pontual de um arquivo:
+```bash
+python minic.py programa.c
+```
+
+#### Execução dos Testes em C
+
+```bash
+# Executar a bateria oficial compilando o runner em C com GCC:
+./testes_semanticos_c.sh minic.c "/caminho/para/pasta_testes"
+
+# Resultado obtido:
+# Compilando o analisador com gcc...
+# [OK] 01_promocao_numerica.c
+# ...
+# [OK] 20_destino_nao_atribuivel.c
+# Resultado: 20/20 aprovados; 0 reprovados.
+```
+
+---
+
+## Interfaces Gráficas (UI / Tkinter)
+
+O projeto conta com interfaces visuais completas e interativas para inspeção pedagógica de cada fase:
+
+### 1. Painel Principal (Launcher)
 ```bash
 python main.py
 ```
+Abre o painel integrado que permite navegar e acionar com um clique:
+- **Análise Léxica** (`ProjetoMiniC.src.lexer`)
+- **Análise Sintática** (`ProjetoMiniC.src.parser`)
+- **Análise Semântica** (`ProjetoMiniC.src.semantic`)
+- Botões de prévia para as etapas subsequentes (IR, Otimizador, Codegen)
 
-- Sem argumentos: abre o painel gráfico (Tkinter), com atalhos para cada etapa do compilador (as etapas ainda não implementadas exibem um aviso).
-- Com um arquivo como argumento: roda a análise léxica em modo terminal.
+### 2. Telas Dedicadas de Cada Módulo
+Cada módulo pode ser executado diretamente em modo gráfico isolado:
 
+- **Interface da Análise Léxica:**
+  ```bash
+  python -m ProjetoMiniC.src.lexer
+  ```
+  Permite carregar arquivos `.minic`/`.c`, visualizar tokens em tabela categorizada, inspecionar lexemas, posições e erros léxicos.
+
+- **Interface da Análise Sintática:**
+  ```bash
+  python -m ProjetoMiniC.src.parser
+  ```
+  Permite editar código, executar o parser descendente recursivo, visualizar a Árvore Sintática Abstrata (AST) formatada e inspecionar diagnósticos sintáticos.
+
+- **Interface da Análise Semântica:**
+  ```bash
+  python -m ProjetoMiniC.src.semantic
+  ```
+  Permite carregar exemplos válidos e com erros semânticos, executar a análise estática e inspecionar diagnósticos formatados com linha, coluna, código de erro e detalhes.
+
+---
+
+## Executando as Etapas via Linha de Comando (CLI)
+
+### 1. Análise Sintática e AST
 ```bash
-python main.py caminho/para/arquivo.minic
-python main.py caminho/para/arquivo.minic --tokens   # imprime só a tabela de tokens
-python main.py caminho/para/arquivo.minic --errors   # imprime só os erros léxicos
-python main.py caminho/para/arquivo.minic --jsonl    # imprime tokens/erros em JSONL
+# Validar apenas sintaxe (retorna 0 se OK, ou exibe erros sintáticos):
+python main.py programa.c --parse
+
+# Gerar e imprimir a AST em árvore hierárquica legível:
+python main.py programa.c --ast
+
+# Imprimir a AST em formato S-Expression parentetizado:
+python main.py programa.c --ast --sexp
 ```
 
-Alternativamente, é possível rodar o pacote do lexer diretamente, a partir da pasta `ProjetoMiniC`:
-
+### 2. Análise Léxica (Scanner em Python)
 ```bash
-cd ProjetoMiniC
-python -m src.lexer                                   # abre a interface gráfica do lexer
-python -m src.lexer ../ProjetoMiniC/casos-invalidos/i01_simbolo_desconhecido.minic --jsonl
+python main.py programa.c --tokens   # Exibe tabela formatada de tokens
+python main.py programa.c --errors   # Exibe diagnósticos de erros léxicos
+python main.py programa.c --jsonl    # Saída estruturada em JSONL (padrão de testes)
 ```
 
-### Interface gráfica do lexer
-
-A interface em Tkinter (`AplicacaoLexer`, em `src/lexer/__main__.py`) permite:
-
-1. executar os testes embutidos do lexer (`demo.py`);
-2. colar um trecho de código diretamente na interface e analisá-lo;
-3. abrir um arquivo `.minic`, `.mc`, `.c` ou `.txt` e analisá-lo;
-4. visualizar a saída formatada, os tokens em JSONL e os erros em JSONL em abas separadas, além de copiar o JSONL de tokens para a área de transferência.
-
-## Executando a versão em C
-
-A versão em C implementa o mesmo analisador léxico. O `Makefile`, na raiz do repositório, foi escrito para ser executado com o diretório de trabalho dentro de `C/`:
-
+### 3. Análise Léxica (Scanner em C)
 ```bash
 cd C
-make -f ../Makefile          # compila o binário minic_scanner
-./minic_scanner arquivo.c              # saída legível (tabela de tokens + diagnóstico)
-./minic_scanner arquivo.c --jsonl      # saída apenas em JSONL (tokens no stdout, erros no stderr)
+make -f ../Makefile                 # Compila o executável minic_scanner
+./minic_scanner arquivo.c           # Saída formatada de tokens
+./minic_scanner arquivo.c --jsonl   # Saída em formato JSONL
+make -f ../Makefile test            # Executa os testes de regressão do scanner em C
 ```
 
-Alvos adicionais do Makefile (executados também a partir de `C/`):
+---
 
-```bash
-make -f ../Makefile test-valid    # roda o scanner sobre os programas em casos-programas-c/
-make -f ../Makefile test-invalid  # roda o scanner sobre os casos em casos-invalidos/
-make -f ../Makefile test          # roda os dois conjuntos de teste
-make -f ../Makefile clean         # remove binários e arquivos de saída gerados
-```
+## Tecnologias e Diretrizes de Engenharia
 
-## O que o lexer reconhece
-
-- palavras reservadas, identificadores, números inteiros e reais, operadores e delimitadores;
-- strings e caracteres, incluindo casos malformados;
-- comentários de linha e de bloco;
-- erros léxicos, como símbolos desconhecidos, comentários não terminados, strings/caracteres não terminados, números reais malformados e identificadores iniciados por dígito.
-
-Cada token reconhecido carrega tipo, lexema, atributo (quando aplicável), linha e coluna. A saída pode ser formatada em tabela ou serializada em JSONL, seguindo o mesmo formato entre as versões Python e C.
-
-## Casos de teste
-
-- `ProjetoMiniC/casos-programas-c/`: programas `.c` válidos (Fibonacci, números primos, média de vetor, menu interativo, controle de temperatura), cada um com o `.expected.jsonl` correspondente.
-- `ProjetoMiniC/casos-invalidos/`: trechos `.minic` com erros léxicos propositais, cada um com `.expected.jsonl` (tokens esperados) e `.errors.jsonl` (erros esperados).
-
-## Documentação
-
-- `ProjetoMiniC/docs/README.md`: detalhes específicos da implementação em Python.
-- `ProjetoMiniC/docs/gramatica.ebnf`: gramática da linguagem MiniC.
-- `ProjetoMiniC/docs/especificacao.md` e `docs/arquitetura.md`: ainda a serem preenchidos.
-
-## Tecnologias
-
-- Python 3 + Tkinter (interface gráfica)
-- C11 (gcc, make)
-- JSONL como formato de intercâmbio de tokens/erros entre as implementações e os casos de teste
+- **Python 3.10+**: Código estritamente tipado (`typing`, `Optional`, `Union`), estruturas com `@dataclass`, padrões de design limpos e compatibilidade multi-plataforma (Windows, Linux, macOS).
+- **C11**: Compilação via GCC com flags rigorosas (`-Wall -Wextra`).
+- **Compatibilidade Canônica de Saída**: Tratamento rigoroso de quebras de linha (`CRLF` vs `LF`) e codificação UTF-8, garantindo correspondência byte a byte com os gabaritos e diffs dos scripts avaliadores.
