@@ -403,24 +403,217 @@ Erros léxicos e sintáticos são reportados com linha e coluna.
 - C11 (gcc, make)
 - JSONL como formato de intercâmbio de tokens/erros entre as implementações e os casos de teste
 
-## Análise semântica
+## Análise Semântica (Aula 15)
 
+O analisador semântico valida todas as restrições estáticas da linguagem MiniC após a construção da AST, incluindo escopos léxicos, checagem e coerção de tipos, aridade e fluxo de controle (`SEM001` a `SEM013`).
+
+### Como o Professor Pode e Deve Realizar os Testes
+
+Os testes semânticos oficiais (20 casos de teste canônicos: 10 aceitos e 10 rejeitados) devem ser executados a partir da raiz do repositório utilizando os scripts de teste Bash oficiais fornecidos:
+
+#### 1. Testes em C (compilação automática com GCC):
 ```bash
+./testes_semanticos_c.sh minic.c minic-testes-semanticos
+```
+*(ou informando o caminho do diretório: `./testes_semanticos_c.sh minic.c "/caminho/para/minic-testes-semanticos"`)*
+
+#### 2. Testes em Python (Python 3.10+):
+```bash
+./testes_semanticos_py.sh minic.py minic-testes-semanticos
+```
+*(ou informando o caminho do diretório: `./testes_semanticos_py.sh minic.py "/caminho/para/minic-testes-semanticos"`)*
+
+#### 3. Execução individual de um arquivo:
+```bash
+# Em Python:
 python3 minic.py arquivo.c
-python3 main.py arquivo.c --semantic
-make semantic
+
+# Em C:
+gcc -Wall -Wextra minic.c -o minic
 ./minic arquivo.c
-make test-semantic
 ```
 
-Os wrappers `minic.py` e `minic.c` executam lexer → parser/AST → semântica,
-preservando `parser.py` e `parser.c` como entradas sintáticas. Erros semânticos
-retornam 4. Regras, contrato de diagnósticos e resultados de validação estão em
-[semantica.md](ProjetoMiniC/docs/semantica.md).
+Os wrappers `minic.py` e `minic.c` executam o pipeline completo: **Lexer → Parser/AST → Análise Semântica**.
+- Se o programa for válido: retorna código `0` e imprime `Análise semântica concluída: 0 erros; programa aceito.`
+- Se houver violação semântica: retorna código `4` e imprime os diagnósticos `SEMxxx` ordenados seguidos de `Análise semântica concluída: N erro(s); programa rejeitado.`
 
-Suíte semântica fornecida (20/20 em cada linguagem):
+---
 
-```bash
-bash testes_semanticos_py.sh minic.py minic-testes-semanticos
-bash testes_semanticos_c.sh minic.c minic-testes-semanticos
+### Incrementos Realizados nos Scripts de Teste
+
+Os scripts `testes_semanticos_c.sh` e `testes_semanticos_py.sh` preservam **100% da verificação original do professor** (comparações exatas via `diff -u` contra os arquivos `.gabarito`) e trazem os seguintes incrementos:
+1. **Detalhamento Caso a Caso:** Apresenta a saída e o diagnóstico exato gerado pelo compilador para cada um dos 20 testes.
+2. **Classificação Semântica Explícita:** Indica se cada teste teve status **ACEITO** ou **REJEITADO**.
+3. **Divisórias Visuais:** Linhas demarcadoras (`______________________________________________________________________`) para legibilidade e clareza no terminal.
+4. **Resumo Semântico Final:** Contabilização final confirmando exatamente `10 aceitos | 10 rejeitados (Total: 20 casos)`.
+
+---
+
+### Exemplo de Saída dos Testes Automatizados
+
+Abaixo está o exemplo da saída gerada tanto pelo runner em **C** quanto pelo runner em **Python**:
+
+```text
+Compilando o analisador com gcc...
+[OK]     .../minic-testes-semanticos/01_promocao_numerica.c
+[OK]     .../minic-testes-semanticos/02_sombreamento_lexico.c
+[OK]     .../minic-testes-semanticos/03_logica_e_comparacoes.c
+[OK]     .../minic-testes-semanticos/04_vetores_e_parametro_array.c
+[OK]     .../minic-testes-semanticos/05_lacos_aninhados.c
+[OK]     .../minic-testes-semanticos/06_recursao_e_retorno.c
+[OK]     .../minic-testes-semanticos/07_void_como_comando.c
+[OK]     .../minic-testes-semanticos/08_retornos_nos_dois_ramos.c
+[OK]     .../minic-testes-semanticos/09_atribuicao_associativa.c
+[OK]     .../minic-testes-semanticos/10_vetor_bool_e_funcoes.c
+[OK]     .../minic-testes-semanticos/11_estreitamento_implicito.c
+[OK]     .../minic-testes-semanticos/12_identificador_nao_declarado.c
+[OK]     .../minic-testes-semanticos/13_declaracao_duplicada.c
+[OK]     .../minic-testes-semanticos/14_condicao_nao_booleana.c
+[OK]     .../minic-testes-semanticos/15_indice_float.c
+[OK]     .../minic-testes-semanticos/16_aridade_incorreta.c
+[OK]     .../minic-testes-semanticos/17_tipos_de_argumentos.c
+[OK]     .../minic-testes-semanticos/18_uso_de_void_como_valor.c
+[OK]     .../minic-testes-semanticos/19_retorno_e_cobertura.c
+[OK]     .../minic-testes-semanticos/20_destino_nao_atribuivel.c
+
+Resultado: 20/20 aprovados; 0 reprovados.
+
+______________________________________________________________________
+DETALHAMENTO DAS SAÍDAS E DIAGNÓSTICOS GERADOS (GABARITO AULA 15):
+______________________________________________________________________
+
+[1] Teste: 01_promocao_numerica.c
+Status Semântico: ACEITO
+Saída / Diagnóstico:
+  Análise semântica concluída: 0 erros; programa aceito.
+______________________________________________________________________
+
+[2] Teste: 02_sombreamento_lexico.c
+Status Semântico: ACEITO
+Saída / Diagnóstico:
+  Análise semântica concluída: 0 erros; programa aceito.
+______________________________________________________________________
+
+[3] Teste: 03_logica_e_comparacoes.c
+Status Semântico: ACEITO
+Saída / Diagnóstico:
+  Análise semântica concluída: 0 erros; programa aceito.
+______________________________________________________________________
+
+[4] Teste: 04_vetores_e_parametro_array.c
+Status Semântico: ACEITO
+Saída / Diagnóstico:
+  Análise semântica concluída: 0 erros; programa aceito.
+______________________________________________________________________
+
+[5] Teste: 05_lacos_aninhados.c
+Status Semântico: ACEITO
+Saída / Diagnóstico:
+  Análise semântica concluída: 0 erros; programa aceito.
+______________________________________________________________________
+
+[6] Teste: 06_recursao_e_retorno.c
+Status Semântico: ACEITO
+Saída / Diagnóstico:
+  Análise semântica concluída: 0 erros; programa aceito.
+______________________________________________________________________
+
+[7] Teste: 07_void_como_comando.c
+Status Semântico: ACEITO
+Saída / Diagnóstico:
+  Análise semântica concluída: 0 erros; programa aceito.
+______________________________________________________________________
+
+[8] Teste: 08_retornos_nos_dois_ramos.c
+Status Semântico: ACEITO
+Saída / Diagnóstico:
+  Análise semântica concluída: 0 erros; programa aceito.
+______________________________________________________________________
+
+[9] Teste: 09_atribuicao_associativa.c
+Status Semântico: ACEITO
+Saída / Diagnóstico:
+  Análise semântica concluída: 0 erros; programa aceito.
+______________________________________________________________________
+
+[10] Teste: 10_vetor_bool_e_funcoes.c
+Status Semântico: ACEITO
+Saída / Diagnóstico:
+  Análise semântica concluída: 0 erros; programa aceito.
+______________________________________________________________________
+
+[11] Teste: 11_estreitamento_implicito.c
+Status Semântico: REJEITADO (Erros semânticos detectados)
+Saída / Diagnóstico:
+  SEM003 — linha 3, coluna 9: Não é possível atribuir float a int sem conversão permitida (destino “n”; expressão “2.5”).
+  Análise semântica concluída: 1 erro; programa rejeitado.
+______________________________________________________________________
+
+[12] Teste: 12_identificador_nao_declarado.c
+Status Semântico: REJEITADO (Erros semânticos detectados)
+Saída / Diagnóstico:
+  SEM001 — linha 3, coluna 9: Identificador “ausente” não declarado neste escopo.
+  Análise semântica concluída: 1 erro; programa rejeitado.
+______________________________________________________________________
+
+[13] Teste: 13_declaracao_duplicada.c
+Status Semântico: REJEITADO (Erros semânticos detectados)
+Saída / Diagnóstico:
+  SEM002 — linha 3, coluna 11: “medida” já declarado neste escopo; declaração anterior na linha 2, coluna 9 (tipo int).
+  Análise semântica concluída: 1 erro; programa rejeitado.
+______________________________________________________________________
+
+[14] Teste: 14_condicao_nao_booleana.c
+Status Semântico: REJEITADO (Erros semânticos detectados)
+Saída / Diagnóstico:
+  SEM005 — linha 4, coluna 12: Condição de while deve ter tipo bool; recebeu int (expressão “n”).
+  Análise semântica concluída: 1 erro; programa rejeitado.
+______________________________________________________________________
+
+[15] Teste: 15_indice_float.c
+Status Semântico: REJEITADO (Erros semânticos detectados)
+Saída / Diagnóstico:
+  SEM006 — linha 3, coluna 11: Índice do vetor “dados” deve ser int; recebeu float (expressão “1.0”).
+  Análise semântica concluída: 1 erro; programa rejeitado.
+______________________________________________________________________
+
+[16] Teste: 16_aridade_incorreta.c
+Status Semântico: REJEITADO (Erros semânticos detectados)
+Saída / Diagnóstico:
+  SEM007 — linha 5, coluna 12: “combina” espera 2 argumentos, mas recebeu 1.
+  Análise semântica concluída: 1 erro; programa rejeitado.
+______________________________________________________________________
+
+[17] Teste: 17_tipos_de_argumentos.c
+Status Semântico: REJEITADO (Erros semânticos detectados)
+Saída / Diagnóstico:
+  SEM008 — linha 5, coluna 20: Argumento 1 de “combina”: esperado int, recebido bool (expressão “1 < 2”).
+  SEM008 — linha 5, coluna 27: Argumento 2 de “combina”: esperado float, recebido bool (expressão “3 < 4”).
+  Análise semântica concluída: 2 erros; programa rejeitado.
+______________________________________________________________________
+
+[18] Teste: 18_uso_de_void_como_valor.c
+Status Semântico: REJEITADO (Erros semânticos detectados)
+Saída / Diagnóstico:
+  SEM012 — linha 6, coluna 9: Função “acao” não produz valor (retorno void) e não pode ser usada como expressão de atribuição.
+  Análise semântica concluída: 1 erro; programa rejeitado.
+______________________________________________________________________
+
+[19] Teste: 19_retorno_e_cobertura.c
+Status Semântico: REJEITADO (Erros semânticos detectados)
+Saída / Diagnóstico:
+  SEM009 — linha 2, coluna 12: Retorno float incompatível com o tipo int da função “fracionario”; conversão implícita de float para int não permitida.
+  SEM011 — linha 4, coluna 1: A função “incompleta” pode terminar sem retornar int; o ramo em que “condicao” é falso alcança o fim do corpo.
+  Análise semântica concluída: 2 erros; programa rejeitado.
+______________________________________________________________________
+
+[20] Teste: 20_destino_nao_atribuivel.c
+Status Semântico: REJEITADO (Erros semânticos detectados)
+Saída / Diagnóstico:
+  SEM013 — linha 3, coluna 5: Destino de atribuição não é atribuível; o literal inteiro “3” não designa uma variável ou elemento de vetor.
+  Análise semântica concluída: 1 erro; programa rejeitado.
+______________________________________________________________________
+
+Resumo Semântico: 10 aceitos | 10 rejeitados (Total: 20 casos)
 ```
+

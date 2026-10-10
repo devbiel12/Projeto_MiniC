@@ -32,7 +32,7 @@ def main(argv=None):
         lines.append(f'Análise semântica concluída: {len(errors)} {"erro" if len(errors) == 1 else "erros"}; programa rejeitado.')
     else:
         lines.append('Análise semântica concluída: 0 erros; programa aceito.')
-    sys.stdout.write('\r\n'.join(lines))
+    sys.stdout.buffer.write('\r\n'.join(lines).encode('utf-8'))
     return 4 if errors else 0
 
 

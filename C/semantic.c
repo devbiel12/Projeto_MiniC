@@ -367,6 +367,6 @@ int semantic_analyze(AstNode *program,FILE *diagnostics) {
     }
     sem_pop(&c);
     if(c.errors>1)qsort(c.diagnostics,(size_t)c.errors,sizeof(*c.diagnostics),sem_diagnostic_order);
-    for(int i=0;i<c.errors;i++){fputs(c.diagnostics[i].text,c.out);fputs("\r\n",c.out);free(c.diagnostics[i].text);}
+    for(int i=0;i<c.errors;i++){fputs(c.diagnostics[i].text,c.out);fputc('\n',c.out);free(c.diagnostics[i].text);}
     free(c.diagnostics);return c.errors;
 }

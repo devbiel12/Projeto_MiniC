@@ -62,6 +62,43 @@ fi
 printf '\nResultado: %d/%d aprovados; %d reprovados.\n' \
   "$aprovados" "$total" "$reprovados"
 
+# ======================================================================
+# DETALHAMENTO DAS SAÍDAS E DIAGNÓSTICOS (AULA 15)
+# ======================================================================
+echo ""
+echo "______________________________________________________________________"
+echo "DETALHAMENTO DAS SAÍDAS E DIAGNÓSTICOS GERADOS (GABARITO AULA 15):"
+echo "______________________________________________________________________"
+
+cont_aceitos=0
+cont_rejeitados=0
+num=0
+
+while IFS= read -r -d '' teste; do
+  num=$((num + 1))
+  saida="$tmp_dir/saida-$num.txt"
+  nome_teste=$(basename "$teste")
+
+  echo ""
+  echo "[$num] Teste: $nome_teste"
+  if grep -q "programa aceito" "$saida"; then
+    echo "Status Semântico: ACEITO"
+    cont_aceitos=$((cont_aceitos + 1))
+  else
+    echo "Status Semântico: REJEITADO (Erros semânticos detectados)"
+    cont_rejeitados=$((cont_rejeitados + 1))
+  fi
+
+  echo "Saída / Diagnóstico:"
+  sed 's/^/  /' "$saida"
+  echo ""
+  echo "______________________________________________________________________"
+done < <(find "$diretorio" -type f -name '*.c' -print0 | sort -z)
+
+echo ""
+printf 'Resumo Semântico: %d aceitos | %d rejeitados (Total: %d casos)\n' \
+  "$cont_aceitos" "$cont_rejeitados" "$num"
+
 if ((reprovados == 0)); then
   exit 0
 else
