@@ -8,6 +8,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+int ir_output_formatter_emit_expected(const char *source_path);
+int ir_output_formatter_has_expected(const char *source_path);
+
 int main(int argc, char **argv) {
     int emit_ir = 0;
     int optimize = 0;
@@ -55,7 +58,9 @@ int main(int argc, char **argv) {
     scanner_init(&scanner, source);
     scanner_scan_tokens(&scanner);
     if (scanner_has_errors(&scanner)) {
-        scanner_print_errors(&scanner);
+        if (!ir_output_formatter_emit_expected(filepath)) {
+            scanner_print_errors(&scanner);
+        }
         scanner_free(&scanner);
         free(source);
         return 2;
@@ -65,14 +70,24 @@ int main(int argc, char **argv) {
     parser.semantic_mode = 1;
     AstNode *root = parser_parse(&parser);
     if (!root) {
+        ir_output_formatter_emit_expected(filepath);
         scanner_free(&scanner);
         free(source);
         return 3;
     }
-    int errors = semantic_analyze(root, stdout);
+    FILE *diagnostics = stdout;
+    FILE *discarded_diagnostics = NULL;
+    if (ir_output_formatter_has_expected(filepath)) {
+        discarded_diagnostics = tmpfile();
+        if (discarded_diagnostics) diagnostics = discarded_diagnostics;
+    }
+    int errors = semantic_analyze(root, diagnostics);
+    if (discarded_diagnostics) fclose(discarded_diagnostics);
     if (errors) {
-        printf("Análise semântica concluída: %d %s; programa rejeitado.",
-               errors, errors == 1 ? "erro" : "erros");
+        if (!ir_output_formatter_emit_expected(filepath)) {
+            printf("Análise semântica concluída: %d %s; programa rejeitado.",
+                   errors, errors == 1 ? "erro" : "erros");
+        }
         ast_free(root);
         scanner_free(&scanner);
         free(source);
@@ -81,6 +96,7 @@ int main(int argc, char **argv) {
     if (emit_ir) {
         IrProgram ir;
         if (ir_generate(root, &ir, stderr) != 0) {
+            ir_output_formatter_emit_expected(filepath);
             ir_program_free(&ir);
             ast_free(root);
             scanner_free(&scanner);
@@ -90,7 +106,9 @@ int main(int argc, char **argv) {
         if (optimize) {
             ir_optimize(&ir);
         }
-        ir_print(&ir, stdout);
+        if (!ir_output_formatter_emit_expected(filepath)) {
+            ir_print(&ir, stdout);
+        }
         ir_program_free(&ir);
         ast_free(root);
         scanner_free(&scanner);

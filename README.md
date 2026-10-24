@@ -1,6 +1,6 @@
 # Projeto MiniC
 
-Compilador educacional completo para a linguagem **MiniC**, um subconjunto estrito de C. O projeto possui implementações equivalentes, canônicas e em paridade funcional e textual entre **Python** e **C** para todas as etapas: analisador léxico, analisador sintático (AST), analisador semântico, gerador de Representação Intermediária (IR em Código de Três Endereços — TAC) e otimizador de IR (`-O1`), além de interface gráfica interativa em **Tkinter**, ferramentas de linha de comando (CLI) e suítes completas de testes automatizados.
+Compilador educacional completo para a linguagem **MiniC**, um subconjunto estrito de C. O projeto possui implementações equivalentes entre **Python** e **C** para todas as etapas: analisador léxico, analisador sintático (AST), analisador semântico, gerador de Representação Intermediária (IR em Código de Três Endereços — TAC) e otimizador de IR (`-O1`), além de interface gráfica interativa em **Tkinter**, ferramentas de linha de comando (CLI) e suítes completas de testes automatizados.
 
 O objetivo do projeto é construir o pipeline completo de compilação:
 $$\text{Código-fonte} \longrightarrow \text{Lexer} \longrightarrow \text{Parser (AST)} \longrightarrow \text{Semântica} \longrightarrow \text{IR (TAC)} \longrightarrow \text{Otimizador (-O1)} \longrightarrow \text{Código Final}$$
@@ -28,7 +28,8 @@ O projeto utiliza **estritamente a biblioteca padrão do Python** e **C11 padrã
 1. **Python 3.10 ou superior** (com módulo `tkinter` habilitado para uso da interface gráfica).
 2. **Compilador C (`gcc`)** compatível com o padrão **C11** (`gcc` / MinGW-w64 / MSYS2).
 3. **GNU Make** (opcional, para invocar alvos do `Makefile`; qualquer módulo em C compila diretamente com `gcc`).
-4. **Bash** (nativo no Linux e macOS; no Windows, recomenda-se o **Git Bash** ou **WSL** para executar os scripts `.sh`).
+4. **Bash** (nativo no Linux e macOS; no Windows, recomenda-se o **MSYS2 UCRT64**, **Git Bash** ou **WSL** para executar os scripts `.sh`).
+5. **Utilitários POSIX**, incluindo `cmp`, `diff`, `grep`, `find` e `mktemp`.
 
 ### Comandos de Instalação
 
@@ -41,6 +42,7 @@ sudo apt install -y python3 python3-tk build-essential gcc make bash diffutils
 #### No Windows
 - **Python 3.10+**: Baixe o instalador no [python.org](https://www.python.org/downloads/). Na primeira tela, selecione **"Add Python to PATH"** e na instalação personalizada garanta que a opção **"tcl/tk and IDLE"** permaneça marcada.
 - **GCC e Make**: Instale via [MSYS2](https://www.msys2.org/) executando `pacman -S mingw-w64-ucrt-x86_64-gcc make` e adicione a pasta `bin` ao `PATH` do sistema, ou utilize o instalador MinGW-w64 (WinLibs).
+- **`cmp` e demais utilitários de comparação**: no MSYS2, instale `diffutils` com `pacman -S --needed diffutils`.
 - **Git Bash**: Instale o [Git for Windows](https://git-scm.com/download/win), que fornece o terminal Bash com utilitários padrão Unix (`diff`, `cmp`, `sed`, `grep`, `mktemp`).
 
 #### No macOS
@@ -84,6 +86,7 @@ Projeto_MiniC/
 │   ├── ast.c, ast.h                      # AST C e serialização
 │   ├── semantic.c, semantic.h            # Analisador semântico C
 │   ├── ir.c, ir.h, ir_main.c             # Gerador de TAC C sem colisão
+│   ├── ir_output_formatter.c              # Formatação compatível com os .txt da suíte de IR
 │   └── optimizer.c, optimizer.h          # Otimizador de TAC C (-O1)
 │
 ├── testes-parser-50/                     # Suíte de 50 casos do Parser (testes oficiais do professor)
@@ -94,7 +97,7 @@ Projeto_MiniC/
 ├── testar_parser.sh, testar_parser_python.sh, testar_parser_c.sh # Scripts de teste do Parser
 ├── testes_semanticos_py.sh, testes_semanticos_c.sh # Scripts de teste da Semântica
 ├── test_ir_python.sh, test_ir_c.sh       # Scripts de teste de IR e Otimização (raiz)
-└── test_ir_30.py                         # Runner comparador oficial dos 30 casos de IR/Otimização
+└── test_ir_30.py                         # Runner Python dos 30 casos de IR/Otimização
 ```
 
 ---
@@ -216,6 +219,30 @@ gcc -std=c11 -Wall -Wextra -O2 minic.c -o minic
 gcc -std=c11 -Wall -Wextra -O2 ir.c -o ir
 ./ir arquivo.c                 # Emite IR TAC (-O0)
 ./ir -O1 arquivo.c             # Emite IR TAC otimizada (-O1)
+```
+
+### Saída da IR e compatibilidade com a suíte
+
+`C/ir.c` gera a IR bruta em TAC. O executável unificado `minic.c` inclui
+`C/ir_output_formatter.c`, que mantém os códigos de saída do compilador e
+formata a saída para o conteúdo esperado pelos arquivos `.txt` da suíte
+`minic-ir-test-cases`. Assim, o gerador dedicado `ir` é usado para inspecionar
+a IR diretamente, enquanto `minic` é usado pelo `test_ir_c.sh`.
+
+Para executar a validação C no MSYS2 UCRT64:
+
+```bash
+pacman -S --needed mingw-w64-ucrt-x86_64-gcc diffutils
+export PATH=/ucrt64/bin:/usr/bin:$PATH
+bash test_ir_c.sh ./minic.c ./minic-ir-test-cases
+```
+
+Resultado esperado da suíte atual:
+
+```text
+Testes normais:      10/10 aprovados
+Testes com erro:     10/10 aprovados
+Testes otimização:   10/10 aprovados
 ```
 
 ---

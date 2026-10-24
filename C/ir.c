@@ -791,32 +791,14 @@ static void ir_append_instruction(DynStr *out, const IrInstruction *inst) {
             break;
         case IR_FUNC_BEGIN:
             dynstr_push_str(out, "func ");
-            dynstr_push_str(out, inst->arg1);
-            dynstr_push_char(out, ' ');
             dynstr_push_str(out, inst->dest);
-            dynstr_push_char(out, ':');
             break;
         case IR_FUNC_END:
             dynstr_push_str(out, "endfunc");
             break;
         case IR_PARAM:
-            dynstr_push_str(out, indent);
-            dynstr_push_str(out, "param ");
-            dynstr_push_str(out, inst->arg1);
-            dynstr_push_char(out, ' ');
-            dynstr_push_str(out, inst->dest);
             break;
         case IR_LOCAL:
-            dynstr_push_str(out, indent);
-            dynstr_push_str(out, "local ");
-            dynstr_push_str(out, inst->arg1);
-            dynstr_push_char(out, ' ');
-            dynstr_push_str(out, inst->dest);
-            if (inst->arg2) {
-                dynstr_push_char(out, '[');
-                dynstr_push_str(out, inst->arg2);
-                dynstr_push_char(out, ']');
-            }
             break;
         case IR_COPY:
             dynstr_push_str(out, indent);
@@ -878,7 +860,7 @@ static void ir_append_instruction(DynStr *out, const IrInstruction *inst) {
             break;
         case IR_ARG:
             dynstr_push_str(out, indent);
-            dynstr_push_str(out, "arg ");
+            dynstr_push_str(out, "param ");
             dynstr_push_str(out, inst->arg1);
             break;
         case IR_CALL:
@@ -921,8 +903,12 @@ static void ir_append_instruction(DynStr *out, const IrInstruction *inst) {
 char *ir_format(const IrProgram *program) {
     DynStr out;
     dynstr_init(&out);
+    size_t emitted = 0;
     for (size_t i = 0; i < program->count; ++i) {
-        if (i > 0) dynstr_push_char(&out, '\n');
+        if (program->items[i].kind == IR_PARAM || program->items[i].kind == IR_LOCAL) {
+            continue;
+        }
+        if (emitted++ > 0) dynstr_push_char(&out, '\n');
         ir_append_instruction(&out, &program->items[i]);
     }
     return out.data;

@@ -1,4 +1,5 @@
 /* Single translation unit for the semantic, IR, and optimizer runner. */
+#include "C/ir_output_formatter.c"
 #include "C/semantic_main.c"
 #include "C/optimizer.c"
 #include "C/ir.c"
